@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CyberSentinel Core Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <script src="/dashboard/chart.min.js"></script>
+</head>
+<body>
+
+  <header class="topbar">
+    <h1>CyberSentinel Core Dashboard</h1>
+    <span id="systemTime" style="font-family: monospace; color: var(--muted);">Syncing RTC...</span>
+  </header>
+
+  <main class="container">
+    
+    <section class="cards">
+      <div class="card">
+        <div class="card-title">Threat Score</div>
+        <div class="card-value" id="threatVal">0.0</div>
+        <div class="card-sub" id="avg_threat">avg 0.0</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Classification</div>
+        <div class="action-indicator">
+          <div class="action-light safe" id="actionLight"></div>
+          <div class="action-text" id="classVal" style="color: #10B981;">SAFE</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">RSSI Status</div>
+        <div class="card-value" id="rssiVal">-95.0 dBm</div>
+        <div class="card-sub" id="avg_rssi">avg -95.0</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Entropy</div>
+        <div class="card-value" id="entropyVal">0.00</div>
+        <div class="card-sub" id="avg_entropy">avg 0.00</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Packet Velocity</div>
+        <div class="card-value" id="packetRateVal">0 pkts/s</div>
+        <div class="card-sub">Real-time throughput</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Packets Processed</div>
+        <div class="card-value" id="packetVal">0</div>
+        <div class="card-sub">Total captured</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">WiFi Status</div>
+        <div class="card-value" id="wifiStatusVal">AP Mode</div>
+        <div class="card-sub" id="wifiIPVal">IP: 192.168.4.1</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">ISR Queue Load</div>
+        <div class="card-value" id="isrQueueVal">0 / 1024</div>
+        <div class="card-sub">FreeRTOS Ring Buffer</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Memory Usage</div>
+        <div class="card-value" id="memoryVal">0%</div>
+        <div class="card-sub" id="heapVal">Free: 0 B</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">System Health</div>
+        <div class="health-score" id="healthScore">100%</div>
+        <div class="health-bar" id="healthBar">
+          <div class="health-fill success" id="healthFill" style="width: 100%;"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="system-info">
+      <h3>System Information</h3>
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="info-title">Performance</div>
+          <div class="info-content" id="perfInfo">CPU: 240MHz<br>Heap: 0 bytes (0%)<br>Flash: 4MB<br>Free Sketch: 0KB</div>
+        </div>
+        <div class="info-card">
+          <div class="info-title">Network</div>
+          <div class="info-content" id="networkInfo">Status: AP Mode<br>IP: 192.168.4.1<br>RSSI: 0 dBm<br>Access: dashboard</div>
+        </div>
+        <div class="info-card">
+          <div class="info-title">Storage</div>
+          <div class="info-content" id="storageInfo">Status: Ready<br>Files: 0 total</div>
+        </div>
+        <div class="info-card">
+          <div class="info-title">API Endpoints</div>
+          <div class="info-content" id="apiInfo">/data: active<br>/events: active<br>/system: active</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="charts">
+      <div class="chart-card">
+        <canvas id="threatHistoryChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <canvas id="entropyChart"></canvas>
+      </div>
+    </section>
+
+    <section class="controls">
+      <h3>Frequency & Observation Controls</h3>          
+      <h4>Current Channel: <span id="channelDisplay" style="color: #3498db;">Auto-Hopping (Ch 1)</span></h4>
+      
+      <div class="control-row" style="margin-bottom: 18px;">
+        <label for="channelSelect" style="margin-right: 8px; font-size: 13px; color: var(--muted);">Radio Allocation:</label>
+        <select id="channelSelect" class="btn" onchange="handleChannelChange(this.value)">
+          <option value="auto">Auto-Hopping (Spectrum Scan)</option>
+          <hr>  
+          <option value="1">Ch 1 (2.412 GHz) — Non-Overlapping</option>
+          <option value="2">Ch 2 (2.417 GHz)</option>
+          <option value="3">Ch 3 (2.422 GHz)</option>
+          <option value="4">Ch 4 (2.427 GHz)</option>
+          <option value="5">Ch 5 (2.432 GHz)</option>
+          <option value="6" selected>Ch 6 (2.437 GHz) — Non-Overlapping</option>
+          <option value="7">Ch 7 (2.442 GHz)</option>
+          <option value="8">Ch 8 (2.447 GHz)</option>
+          <option value="9">Ch 9 (2.452 GHz)</option>
+          <option value="10">Ch 10 (2.457 GHz)</option>
+          <option value="11">Ch 11 (2.462 GHz) — Non-Overlapping</option>
+          <option value="12">Ch 12 (2.467 GHz)</option>
+          <option value="13">Ch 13 (2.472 GHz)</option>
+        </select>
+      </div>
+
+      <h3>Data Export Matrix</h3>
+      <div class="label-buttons">
+        <button class="btn" onclick="exportData('json')">Export JSON</button>
+        <button class="btn" onclick="exportData('csv')">Export CSV</button>
+        <button class="btn" onclick="exportData('report')">Download Report</button>
+      </div>
+    </section>
+
+    <section class="stats-panel">
+      <div class="section-title" style="font-weight: 600; font-size: 14px;">System Statistics</div>
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-label">Total Events</div>
+          <div class="stat-value" id="totalEvents">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">High Threats</div>
+          <div class="stat-value" id="highThreats" style="color: var(--critical);">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">System Uptime</div>
+          <div class="stat-value" id="systemUptime">0s</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Response Time</div>
+          <div class="stat-value" id="responseTime">0ms</div>
+        </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="log">
+      <h3>Recent Events & Mitigation Recommendations</h3>
+      <div id="logArea" class="log-area">System online - Monitoring airspace...</div>
+    </section>
+  </main>
+
+  <div id="threatAlert" class="threat-alert"></div>
+  <div id="notificationContainer"></div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
