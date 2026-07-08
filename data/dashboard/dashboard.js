@@ -295,7 +295,7 @@ async function fetchData() {
         if (displayClass === "CRITICAL") {
             classColor = "#EF4444"; // Red
             lightClass = "critical";
-        } else if (displayClass === "ELEVATED") {
+        } else if (displayClass === "RECONNAISSANCE") {
             classColor = "#F59E0B"; // Orange
             lightClass = "elevated";
         } else if (displayClass === "WARNING") {
