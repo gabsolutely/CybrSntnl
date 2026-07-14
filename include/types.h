@@ -119,19 +119,6 @@ struct Event {
     // float effect;            // [FUTURE]
 };
 
-// Structural schema for pairing signature identifiers with remedial steps
-struct AttackProfile {
-    const char* attack_type;
-    const char* recommendation;
-};
 
-// Attack profile library for direct mapping of detected attack types to actionable recommendations, optimized for static memory usage
-static const AttackProfile TAILORED_ATTACKS[] = {
-    {"High Traffic Volume",                  "Deploy packet throttling and rate limiting protocols."},
-    {"Deauthentication Flood",               "Enable 802.11w Protected Management Frames (PMF) on AP."},
-    {"MAC Spoofing / Assoc Flood",           "Enable 802.11w Protected Management Frames (PMF) and MAC filtering."},
-    {"Signal Instability / Jamming Attempt", "Trigger frequency hopping or shift critical telemetry channels."},
-    {"Normal",                               "System secure. No anomalies detected."}
-};
 
 #endif // TYPES_H

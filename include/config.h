@@ -9,6 +9,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <cstddef> // For size_t
+
 // =============================================================================
 // 1. BUILD MODE & TARGET FLAGS
 // =============================================================================
@@ -161,6 +163,58 @@ static const char* const THREAT_RECOMMENDATIONS[] = {
     "Verify network device authorization states.",
     "Isolate target device. Threat lock engaged."
 };
+
+// Attack type configurations with tailored recommendations
+struct AttackProfile {
+    const char* attack_type;
+    const char* recommendation;
+};
+
+static const AttackProfile ATTACK_PROFILES[] = {
+    {"High Traffic Volume",                  "Deploy packet throttling and rate limiting protocols."},
+    {"Deauthentication Flood",               "Enable 802.11w Protected Management Frames (PMF) on AP."},
+    {"MAC Spoofing / Assoc Flood",           "Enable 802.11w Protected Management Frames (PMF) and MAC filtering."},
+    {"Signal Instability / Jamming Attempt", "Trigger frequency hopping or shift critical telemetry channels."},
+    {"Normal",                               "System secure. No anomalies detected."}
+};
+
+// Helper to get number of attack profiles
+static constexpr size_t ATTACK_PROFILES_COUNT = sizeof(ATTACK_PROFILES) / sizeof(ATTACK_PROFILES[0]);
+
+// Threat detection thresholds
+static constexpr float DEAUTH_THRESHOLD = 2.0f;       // Deauth packets per second
+static constexpr float ASSOC_THRESHOLD = 100.0f;     // Assoc packets per second
+static constexpr float RSSI_VARIANCE_THRESHOLD = 15.0f; // RSSI variance threshold
+
+// Feature extraction constants
+#define FEATURE_MIN_PACKETS          5     // Minimum packets needed in window to extract features
+#define MAX_CHANNELS                 15    // Maximum number of channels to track
+#define RSSI_MIN                     -100  // Minimum RSSI value (dBm)
+#define RSSI_MAX                     0     // Maximum RSSI value (dBm)
+#define MAC_ENTROPY_MAX              8.0f  // Maximum MAC entropy value
+#define CHANNEL_ENTROPY_MAX          14.0f // Maximum channel entropy/diversity
+
+// Radio intake constants
+#define MAX_PACKETS_PER_CYCLE        200   // Max packets to process per radio intake cycle
+#define RADIO_OUTPUT_INTERVAL_MS     2000  // Interval for radio output to Serial
+#define QUEUE_WARNING_THRESHOLD      0.8f  // Queue fill percentage to trigger warning
+#define QUEUE_WARNING_INTERVAL_MS    5000  // Interval between queue warnings
+
+// Dashboard constants
+#define MUTEX_TIMEOUT_MS             20    // Mutex timeout for global state access (ms)
+#define EMA_WEIGHT                   0.1f  // Exponential Moving Average weight for threat/entropy
+#define HIGH_THREAT_THRESHOLD        7.0f  // Threshold for high-threat alerts
+#define CSV_MUTEX_TIMEOUT_MS         50    // Mutex timeout for CSV generation
+
+// Logger constants
+#define MAX_LOG_ENTRIES              1000  // Maximum log entries before rotation
+
+// SPIFFS dashboard file validation thresholds
+#define DASHBOARD_HTML_MIN_SIZE      1000  // Minimum size for valid dashboard.html
+#define DASHBOARD_CSS_MIN_SIZE       100   // Minimum size for valid dashboard.css
+#define DASHBOARD_JS_MIN_SIZE        1000  // Minimum size for valid dashboard.js
+
+
 
 // =============================================================================
 // 11. SYSTEM RUNTIME INTERFACES
