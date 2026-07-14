@@ -15,7 +15,7 @@ A lightweight, ESP32-based 802.11 wireless threat detection system with real-tim
 - **Memory Safety Features**: Heap monitoring, mutex timeouts, and safe state handling
 
 ## Hardware Requirements
-- ESP32 Development Board (any model with 4MB+ flash and PSRAM recommended)
+- ESP32 Development Board (any model with 4MB+ flash, NO PSRAM required)
 - Optional: LED for sniffing indicator (GPIO 2)
 - Optional: Other LEDs and buttons as defined in `config.h`
 
