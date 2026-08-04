@@ -18,7 +18,7 @@
 // #define CS_MODE_CORE       // Public build with safety restrictions
 // #define CS_MODE_INTERNAL   // Lab build with advanced features  
 
-#define DEVELOPMENT_MODE 1    // Set to 0 for production builds
+#define DEVELOPMENT_MODE 0    // Set to 0 for production builds
 
 #if defined(CS_MODE_INTERNAL)
   #define INTERNAL_BUILD 1
@@ -79,6 +79,12 @@
 #define AP_PASS                    "fallback123456"
 #define FALLBACK_AP_IP             IPAddress(192, 168, 4, 1)
 // #define MAX_CONNECTIONS_NORMAL     4  // [FUTURE]
+
+// Dashboard Web Authentication (HTTP Basic Auth)
+// CHANGE THESE BEFORE DEPLOYING IN ANY UNTRUSTED ENVIRONMENT
+#define DASH_AUTH_USER             "admin"
+#define DASH_AUTH_PASS             "cybersentinel"
+#define DASH_AUTH_ENABLED          1    // Set to 0 to disable auth (NOT recommended)
 
 // =============================================================================
 // 6. SPIFFS VIRTUAL FILE SYSTEM PATHS

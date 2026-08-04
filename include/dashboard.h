@@ -23,16 +23,17 @@ private:
     static bool validateFloatInput(const String &input, const String &fieldName, float minValue, float maxValue);
     static bool validateBooleanInput(const String &input, const String &fieldName);
 
+    // Authentication
+    // Returns true if request is authorized. If false, caller must return
+    // immediately: a 401 WWW-Authenticate response has already been sent.
+    static bool authorizeRequest(bool requireWrite = false);
+
     // HTTP Endpoint Handlers (Static for WebServer callback compatibility)
     static void handleRoot();
     static void handleData();
     static void handleEvents();
     static void handleCSV();
-    static void handleAI();
-    static void handleRunTest();
-    static void handleRunUnitTests();
     static void handleHealth();
-    static void handleTest();
     static void handleChannelChangeRequest();
     static void handleNotFound();
 

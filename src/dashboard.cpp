@@ -113,6 +113,28 @@ bool Dashboard::validateBooleanInput(const String &input,
   return true;
 }
 
+// =============================================================================
+// HTTP BASIC AUTHENTICATION
+// =============================================================================
+// Lightweight gate. Blocks unauthenticated requests to state-changing and
+// telemetry endpoints. Read-only /health is intentionally open so monitoring
+// tools can ping it without credentials.
+bool Dashboard::authorizeRequest(bool requireWrite) {
+  (void)requireWrite; // Reserved for future role split (read-only vs admin)
+
+  if (!globalInstance || !globalInstance->server) return false;
+  WebServer* srv = globalInstance->server;
+
+#if DASH_AUTH_ENABLED
+  if (!srv->authenticate(DASH_AUTH_USER, DASH_AUTH_PASS)) {
+    srv->requestAuthentication("Basic", "CyberSentinel Core");
+    return false;
+  }
+#endif
+
+  return true;
+}
+
 // Initializes server and endpoints
 void Dashboard::init() {
     if (!server)
@@ -150,6 +172,7 @@ void Dashboard::handleRequests() {
 
 // Handles the main dashboard page
 void Dashboard::handleRoot() {
+  if (!authorizeRequest()) return;
   const char* path = PATH_DASHBOARD_HTML; 
 
   if (!SPIFFS.exists(path)) {
@@ -173,6 +196,7 @@ void Dashboard::handleRoot() {
 
 // Handles the /data endpoint, returning JSON with current metrics and threat report
 void Dashboard::handleData() {
+    if (!authorizeRequest()) return;
     if (!globalInstance || !globalInstance->server) return;
 
     JsonDocument doc;
@@ -255,6 +279,7 @@ void Dashboard::handleData() {
 
 // Handles the /events endpoint, returning JSON with current events
 void Dashboard::handleEvents() {
+    if (!authorizeRequest()) return;
     if (!globalInstance || !globalInstance->server) return;
 
     JsonDocument doc;
@@ -297,6 +322,7 @@ void Dashboard::handleEvents() {
 
 // Handles the /csv endpoint, returning a CSV report
 void Dashboard::handleCSV() {
+    if (!authorizeRequest()) return;
     String csv = "timestamp,threat_score,classification,channel\n";
     
     // Protect the read with the mutex!
@@ -350,6 +376,7 @@ void Dashboard::handleNotFound() {
 // STATIC FILE HANDLERS
 // =============================================================================
 void Dashboard::handleCSS() {
+  if (!authorizeRequest()) return;
   const char* path = PATH_DASHBOARD_CSS;
   File file = SPIFFS.open(path, "r");
   if (file) {
@@ -364,6 +391,7 @@ void Dashboard::handleCSS() {
 }
 
 void Dashboard::handleJS() {
+  if (!authorizeRequest()) return;
   const char* path = PATH_DASHBOARD_JS;
   File file = SPIFFS.open(path, "r");
   if (file) {
@@ -379,6 +407,7 @@ void Dashboard::handleJS() {
 
 // Handles the /chart.js endpoint
 void Dashboard::handleChartJS() {
+  if (!authorizeRequest()) return;
   const char* path = PATH_DASHBOARD_CHARTJS;
   File file = SPIFFS.open(path, "r");
   if (file) {
@@ -410,6 +439,7 @@ void Dashboard::handleFavicon() {
 
 // Add the execution handler for setting manual radio states
 void Dashboard::handleChannelChangeRequest() {
+    if (!authorizeRequest(true)) return; // WRITE-protected (state change)
     if (!globalInstance || !globalInstance->server) return;
 
     WebServer* srv = globalInstance->server;
@@ -448,6 +478,7 @@ void Dashboard::handleChannelChangeRequest() {
 
 // Handles the /system endpoint, returning JSON with system performance and status info
 void Dashboard::handleSystem() {
+    if (!authorizeRequest()) return;
     if (!globalInstance || !globalInstance->server) return;
 
     JsonDocument doc;

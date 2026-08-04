@@ -76,3 +76,45 @@ All configuration constants are in `include/config.h`:
 
 ## License
 MIT License — feel free to use, modify, and distribute.
+
+---
+
+## ⚠️ DISCLAIMER & PRODUCTION NOTES
+
+**THIS IS EDUCATIONAL / RESEARCH SOFTWARE. IT IS NOT A SUBSTITUTE FOR PROFESSIONAL-GRADE SECURITY TOOLS.**
+
+- CyberSentinel is provided "AS IS" with no warranties. Use at your own risk.
+- Heuristic detection may produce **false positives** (e.g., normal roaming, congested channels) and **false negatives**. Do not rely on it as your sole IDS/IPS.
+- Promiscuous-mode Wi-Fi monitoring may be subject to local laws. Only run this on networks you own or have explicit written permission to monitor.
+- In its default configuration, the software operates as a passive WIDS (Wireless Intrusion *Detection* System) only. It performs no active blocking or deauthentication.
+
+### Pre-Flight Checklist (Before You Flash)
+1. **Change the default AP credentials** in `include/config.h` (look for `AP_SSID` and `AP_PASS`). The shipped defaults (`CyberSentinel-Fallback` / `fallback123456`) are for demo use only.
+2. **Review threat thresholds** in `include/config.h`:
+   - `DEAUTH_THRESHOLD` (default: 2.0 pkt/s) – lower = more sensitive, more false positives
+   - `ASSOC_THRESHOLD` (default: 100 pkt/s)
+   - `RSSI_VARIANCE_THRESHOLD` (default: 15.0)
+3. **Confirm `DEVELOPMENT_MODE` is 0** in `include/config.h` (already set for release builds).
+4. **Upload both firmware + SPIFFS** using the two PlatformIO commands above. Skipping `uploadfs` leaves you without a dashboard.
+
+### Basic Auth (Enabled by Default)
+The dashboard now requires HTTP Basic Authentication to prevent accidental drive-by access from anyone on the AP.
+
+- **Default username:** `admin`
+- **Default password:** `cybersentinel`
+
+Change these in `include/config.h` before flashing (`DASH_AUTH_USER` and `DASH_AUTH_PASS`). Use a unique password — AP access + default creds = trivial takeover.
+
+### Limitations of This Build
+| Capability | Support |
+|---|---|
+| Deauth flood detection | ✅ Heuristic (rate-based) |
+| Assoc / spoof flood detection | ✅ Heuristic (rate + entropy) |
+| Signal instability / jamming | ✅ RSSI variance |
+| Rogue AP detection | ❌ Planned V2 |
+| Per-MAC tracking | ❌ Planned V2 |
+| Active mitigation (deauth frames) | ❌ Not implemented (IDS-only) |
+| Cloud sync / OTA | ❌ Planned V2 |
+| AI / ML classification | ❌ Planned V3 |
+| 5 GHz bands | ❌ ESP32 hardware limitation |
+| Protected Mgmt Frames (PMF) | ❌ Advisory-only in recommendations |

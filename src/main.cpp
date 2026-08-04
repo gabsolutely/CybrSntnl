@@ -464,12 +464,8 @@ void setup() {
   delay(200);
   pinMode(SNIFF_LED, OUTPUT);
 
-  // Initialize mutexes for thread safety
-  globalStateMutex = xSemaphoreCreateMutex();
-  if (!globalStateMutex) {
-    Serial.println("FATAL: Failed to create global state mutex");
-    return;
-  }
+  // Initialize thread-safe global state and mutexes
+  initializeGlobals();
 
   Serial.println("=========================================");
   Serial.println("🛡️  ESP CYBER SENTINEL BOOTING");

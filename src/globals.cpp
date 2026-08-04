@@ -91,7 +91,11 @@ bool checkSystemHealth() {
     bool healthy = false;
     
     if (globalStateMutex != NULL && xSemaphoreTake(globalStateMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        healthy = systemStatus.wifiConnected && 
+        WiFiMode_t mode = WiFi.getMode();
+        bool networkUp = systemStatus.wifiConnected ||
+                         mode == WIFI_AP ||
+                         mode == WIFI_AP_STA;
+        healthy = networkUp && 
                   systemStatus.spiffsInitialized && 
                   systemStatus.webServerStarted;
         xSemaphoreGive(globalStateMutex);
