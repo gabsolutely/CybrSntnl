@@ -28,4 +28,5 @@ Thumbs.db
 *.swp
 *~
 
-1Refactor
+.vscode
+PITCH.md

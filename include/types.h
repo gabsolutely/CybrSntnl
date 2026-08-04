@@ -3,11 +3,9 @@
 
 #include <Arduino.h>
 
-// Wi-Fi Core Frame Identifiers
+// 802.11 frame subtype markers (used by packet parser + detector)
 #define BEACON_FRAME 0x08
 #define DEAUTH_FRAME 0x0C
-// #define PROBE_REQ_FRAME 0x04  // [FUTURE]
-// #define PROBE_RESP_FRAME 0x05  // [FUTURE]
 
 // =============================================================================
 // LOGGING ENUMS
@@ -30,46 +28,49 @@ enum LogCategory {
 };
 
 // =============================================================================
-// LOG ENTRY SCHEMA
+// STRUCTURED LOG ENTRY
 // =============================================================================
 struct LogEntry {
     unsigned long timestamp;
-    LogLevel level;
-    LogCategory category;
-    String component;
-    String message;
-    size_t memoryUsage;
-    String context;
+    LogLevel        level;
+    LogCategory     category;
+    String          component;
+    String          message;
+    size_t          memoryUsage;
+    String          context;
 };
 
-// Structure to hold the status of various system components
+// Health flags for each subsystem (read by /system and heartbeat)
 struct ComponentStatus {
-    bool wifiConnected = false;
-    bool spiffsInitialized = false;
-    bool webServerStarted = false;
-    bool radioInitialized = false;
+    bool wifiConnected              = false;
+    bool spiffsInitialized          = false;
+    bool webServerStarted           = false;
+    bool radioInitialized           = false;
     bool featureExtractorInitialized = false;
-    bool threatAnalyzerInitialized = false;
-    // bool responsePolicyInitialized = false;  // [FUTURE]
-    bool loggerInitialized = false;
+    bool threatAnalyzerInitialized  = false;
+    bool loggerInitialized          = false;
 };
 
-// Structure to hold metadata for each captured packet
+// =============================================================================
+// PACKET PIPELINE
+// =============================================================================
+// One captured frame, normalized for the FreeRTOS queue.
+// Everything here is ISR-safe (no heap, plain old data).
 struct Metadata {
-    unsigned long ts;
-    uint32_t hashed_src_mac;   
-    uint32_t hashed_dst_mac;   
-    int rssi;
-    int channel;
-    uint8_t frame_type;
-    uint16_t length;
-    float beacon_interval;
-    uint8_t mac[6];  
-    char ssid[33];             
-    uint8_t subtype;  
+    unsigned long ts;          // capture time (ms)
+    uint32_t      hashed_src_mac;
+    uint32_t      hashed_dst_mac;
+    int           rssi;
+    int           channel;
+    uint8_t       frame_type;
+    uint16_t      length;
+    float         beacon_interval;
+    uint8_t       mac[6];
+    char          ssid[33];
+    uint8_t       subtype;
 };
 
-// Structure to hold extracted features from a sliding window of packets
+// Aggregated features computed over a FEATURE_WINDOW_MS sliding window.
 struct FeatureVec {
     float assoc_rate;
     float disassoc_rate;
@@ -80,11 +81,13 @@ struct FeatureVec {
     float timing_jitter;
     float channel_entropy;
     float packet_loss_rate;
-    int peak_channel;
+    int   peak_channel;
 };
-
 typedef FeatureVec Features;
 
+// =============================================================================
+// THREAT ENGINE OUTPUTS
+// =============================================================================
 enum ThreatLevel {
     THREAT_NONE,
     THREAT_LOW,
@@ -92,33 +95,30 @@ enum ThreatLevel {
     THREAT_HIGH
 };
 
-// Swapped out dynamic String heap spaces for static character pointers where data relies on fixed log literals
+// Verdict from ThreatAnalyzer — all strings live in flash (PROGMEM-equivalent
+// char pointers) to avoid heap fragmentation under high telemetry load.
 struct ThreatReport {
-    ThreatLevel level;
-    float threat_score;       
-    const char* classification; // e.g., "SAFE", "LOW", "CRITICAL" (Points to flash memory string literals)
-    const char* attack_type;    // e.g., "Deauth Flood", "Rogue AP", "None"
-    const char* recommendation; // e.g., "Enable PMF"
+    ThreatLevel   level;
+    float         threat_score;
+    const char*   classification;  // "SAFE" / "WARNING" / "RECONNAISSANCE" / "CRITICAL"
+    const char*   attack_type;     // e.g. "Deauthentication Flood"
+    const char*   recommendation;  // remediation advice
     unsigned long timestamp;
-    int offending_channel;
+    int           offending_channel;
 };
 
-// Optimized event logging properties to limit dynamic heap usage over high telemetry rates
+// Structured CSV/exportable event record. Fixed-size notes buffer avoids malloc.
 struct Event {
     unsigned long timestamp;
-    uint32_t trace_id;          // Converted from String to lightweight numeric tracking ID
-    const char* event_type;     // Converted to efficient flash string pointer
-    FeatureVec features;
-    float threat_score;
-    const char* classification; 
-    const char* pre_state;     
-    const char* post_state;    
-    // uint32_t replay_id;      // [FUTURE]
-    const char* recommendation; // Flattened single recommendations pointer to bypass costly std::vector copies
-    char notes[64];             // Replaced dynamic String with static buffer constraint
-    // float effect;            // [FUTURE]
+    uint32_t      trace_id;
+    const char*   event_type;
+    FeatureVec    features;
+    float         threat_score;
+    const char*   classification;
+    const char*   pre_state;
+    const char*   post_state;
+    const char*   recommendation;
+    char          notes[64];
 };
-
-
 
 #endif // TYPES_H

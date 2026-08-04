@@ -596,19 +596,3 @@ void Logger::appendToCSV(const Event& event) {
     
     xSemaphoreGive(logMutex);
 }
-
-void Logger::appendToJSON(const Event& event) {}
-
-// Fixed: Added implementation to satisfy linker definition rules
-std::vector<String> Logger::generateRecommendations(const String& classification) {
-    std::vector<String> recs;
-    if (classification.indexOf("Deauth") != -1) {
-        recs.push_back("Enable 802.11w Management Frame Protection");
-        recs.push_back("Switch to a less congested channel");
-    } else if (classification.indexOf("Beacon") != -1) {
-        recs.push_back("Ignore excessive SSIDs in network manager");
-    } else {
-        recs.push_back("Continue passive network observability");
-    }
-    return recs;
-}
