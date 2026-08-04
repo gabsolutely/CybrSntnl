@@ -34,6 +34,7 @@ private:
     static void handleEvents();
     static void handleCSV();
     static void handleHealth();
+    static void handleStressTest();
     static void handleChannelChangeRequest();
     static void handleNotFound();
 

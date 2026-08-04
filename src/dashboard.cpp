@@ -127,7 +127,7 @@ bool Dashboard::authorizeRequest(bool requireWrite) {
 
 #if DASH_AUTH_ENABLED
   if (!srv->authenticate(DASH_AUTH_USER, DASH_AUTH_PASS)) {
-    srv->requestAuthentication("Basic", "CyberSentinel Core");
+    srv->requestAuthentication(BASIC_AUTH, "CyberSentinel Core");
     return false;
   }
 #endif
@@ -153,6 +153,7 @@ void Dashboard::init() {
   // Additional handlers for compatibility
   server->on("/health", Dashboard::handleHealth);
   server->on("/system", Dashboard::handleSystem);
+  server->on("/stresstest", Dashboard::handleStressTest);
 
   // Static file handlers
   server->on("/dashboard.css", Dashboard::handleCSS);
@@ -261,6 +262,18 @@ void Dashboard::handleData() {
 
     doc["uptime"] = millis() / 1000;
     doc["fw_version"] = FW_VERSION;
+    // Stress test / synthetic demo injector telemetry + capability flag
+    {
+        extern volatile bool stressTestActive;
+        extern volatile unsigned long stressTestInjectedPackets;
+        doc["stress_active"] = (bool)stressTestActive;
+        doc["stress_injected"] = (uint32_t)stressTestInjectedPackets;
+    #if ENABLE_STRESS_SIM
+        doc["stress_capable"] = true;
+    #else
+        doc["stress_capable"] = false;
+    #endif
+    }
     // Map getPacketCount() to total lifetime packets processed
     doc["packets_processed"] = radioIntake.getPacketCount();
     doc["wifi_status"] = wifiStatus;
@@ -348,6 +361,15 @@ void Dashboard::handleHealth() {
     doc["free_heap"] = ESP.getFreeHeap();
     doc["build_mode"] = "CORE";
     doc["fw_version"] = FW_VERSION;
+    {
+        extern volatile bool stressTestActive;
+        doc["stress_active"] = (bool)stressTestActive;
+    #if ENABLE_STRESS_SIM
+        doc["stress_capable"] = true;
+    #else
+        doc["stress_capable"] = false;
+    #endif
+    }
     doc["timestamp"] = millis();
 
     // Guard shared state pointers to pull accurate diagnostics across cores
@@ -364,6 +386,77 @@ void Dashboard::handleHealth() {
     serializeJson(doc, response);
     if (globalInstance && globalInstance->server)
         globalInstance->server->send(200, "application/json", response);
+}
+
+// =============================================================================
+// STRESS TEST / DEMO INJECTOR CONTROL ENDPOINT
+// =============================================================================
+// Runtime toggle for the internal deauth-flood simulator. Exposed so the
+// dashboard has a one-click demo button instead of needing a re-flash.
+//
+// Query parameters (all optional):
+//   ?state=1 | on   -> enable stress injector
+//   ?state=0 | off  -> disable
+//   (no args)       -> read-only JSON status
+//
+// Examples:
+//   GET /stresstest?state=on    // enable (WRITE-protected → needs auth)
+//   GET /stresstest?state=off   // disable
+//   GET /stresstest             // status (also public like /health — no state change)
+void Dashboard::handleStressTest() {
+    if (!globalInstance || !globalInstance->server) return;
+    WebServer* srv = globalInstance->server;
+
+    extern volatile bool stressTestActive;
+    extern volatile unsigned long stressTestInjectedPackets;
+
+    JsonDocument doc;
+
+    // Capability flag — CORE builds report capable=false so UI greys out.
+#if ENABLE_STRESS_SIM
+    const bool capable = true;
+#else
+    const bool capable = false;
+#endif
+    doc["stress_capable"] = capable;
+    doc["stress_active"]  = (bool)stressTestActive;
+
+    // —— State change request —— //
+    if (srv->hasArg("state")) {
+        // Write-gate this. Read-only status above is unauthed.
+        if (!authorizeRequest(true)) return;
+
+        String st = srv->arg("state");
+        st.toLowerCase();
+        bool want = (st == "1" || st == "on" || st == "true");
+
+        if (!capable) {
+            doc["result"]  = "error";
+            doc["message"] = "Stress injector not compiled. Flash with 'internal' env (ENABLE_STRESS_SIM=1) or modify config.h.";
+            doc["fw_env"]  = "core";
+            String out; serializeJson(doc, out);
+            srv->send(400, "application/json", out);
+            return;
+        }
+
+        stressTestActive = want;
+        if (want) {
+            Serial.println("[StressTest] DASHBOARD TRIGGERED — synthetic injector ON");
+            doc["result"]  = "enabled";
+            doc["message"] = "Simulated deauth flood running. Watch threat score climb.";
+        } else {
+            Serial.println("[StressTest] Dashboard cleared — synthetic injector OFF");
+            doc["result"]  = "disabled";
+            doc["message"] = "Injector stopped. Let threat EMA decay back to baseline.";
+        }
+    } else {
+        doc["result"]  = "status";
+        doc["message"] = "No state change requested. Pass ?state=on or ?state=off.";
+    }
+
+    doc["stress_injected"] = (uint32_t)stressTestInjectedPackets;
+    String out; serializeJson(doc, out);
+    srv->send(200, "application/json", out);
 }
 
 // Handles the /404 endpoint

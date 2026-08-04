@@ -70,12 +70,20 @@ TaskHandle_t spiffsRetryTaskHandle = NULL;
 // Assuming your ring buffer handle is declared globally somewhere as:
 // extern RingbufHandle_t buf_handle; 
 
-#if ENABLE_STRESS_SIM
-void taskChaosSimulator(void *pvParameters) {
-    Serial.println("\nTHREAT MODE: Internal Threat Simulator Started!");
+void taskStressTest(void *pvParameters) {
     extern RadioIntake* g_radioIntakeInstance;
+    extern volatile bool stressTestActive;
+    extern volatile unsigned long stressTestInjectedPackets;
+    
+    Serial.println("[StressTest] Control task ready. Dashboard toggle: OFF (idle)");
     
     for (;;) {
+        if (!stressTestActive) {
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+
+#if ENABLE_STRESS_SIM
         if (g_radioIntakeInstance != nullptr) {
             
             for (int i = 0; i < 50; i++) {
@@ -91,15 +99,20 @@ void taskChaosSimulator(void *pvParameters) {
                 fakePacket.hashed_dst_mac = 1234567890U;
                 fakePacket.ssid[0] = '\0'; 
 
-                g_radioIntakeInstance->injectMetadata(fakePacket);
+                if (g_radioIntakeInstance->injectMetadata(fakePacket)) {
+                    stressTestInjectedPackets++;
+                }
 
                 vTaskDelay(pdMS_TO_TICKS(2)); 
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
+#else
+        // Stress sim not compiled in — keep the task alive so the API always reports state correctly.
+        vTaskDelay(pdMS_TO_TICKS(500));
+#endif
     }
 }
-#endif
 
 // Radio intake task with thread safety
 void taskRadioIntake(void *pvParameters) {
@@ -624,11 +637,9 @@ void setup() {
     NULL, 1  
   );
 
-  #if ENABLE_STRESS_SIM
-  xTaskCreatePinnedToCore(taskChaosSimulator, "ChaosSim", 4096, NULL, 1, 
+  xTaskCreatePinnedToCore(taskStressTest, "StressSim", 4096, NULL, 1, 
     NULL, 1 
   );
-  #endif
 
   // Memory check after task creation
   size_t freeHeapAfterTasks = ESP.getFreeHeap();

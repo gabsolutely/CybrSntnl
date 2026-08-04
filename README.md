@@ -6,6 +6,7 @@ A lightweight, ESP32-based 802.11 wireless threat detection system with real-tim
 - **Wi-Fi Packet Sniffing**: Promiscuous mode monitoring of 2.4GHz channels (1-13)
 - **Heuristic Threat Detection**: Detects deauth floods, association floods, and signal instability
 - **Real-Time Dashboard**: Web-based UI served over a standalone access point
+- **🔥 Stress Test**: One-click synthetic detection-pipeline test harness (50 frames/sec injected directly into the metadata queue for demos + threshold tuning; gated behind `-e internal` build flag for release safety)
 - **Multi-Tasking FreeRTOS Design**: Strict core separation for real-time performance
 - **Guerilla Sweep (Anchor & Blitz)**: 80/20 channel time-slicing for continuous monitoring + dashboard responsiveness
 - **Threat Lock Mode**: Auto-locks to suspicious channels with time-sliced dashboard access
@@ -34,8 +35,77 @@ A lightweight, ESP32-based 802.11 wireless threat detection system with real-tim
 ## Dashboard
 1. Connect to the Wi-Fi AP `CyberSentinel-Fallback` (password: `fallback123456`)
 2. Open a browser and navigate to `http://192.168.4.1`
-3. You'll see the real-time threat score, packet counts, and other metrics
-4. Use the channel selector to switch between auto-hop and manual channels
+3. Sign in with Basic Auth (default: `admin` / `cybersentinel` — CHANGE THESE BEFORE FLASHING)
+4. You'll see the real-time threat score, packet counts, and other metrics
+5. Use the channel selector to switch between auto-hop and manual channels
+
+## Stress Test — One-Click Detection Pipeline Self-Test
+Built into the dashboard is a **Stress Test** toggle that simulates a realistic deauth-flood attack profile
+directly inside the detection pipeline without needing a second device. Use it to:
+- Demo the threat-score climb + CRITICAL classification during presentations
+- Tune detection thresholds (`DEAUTH_THRESHOLD` etc.) against a known synthetic attack profile
+- Verify the **Threat Lock** auto-engage path (score ≥ 7.0) works)
+- Confirm the dashboard stays responsive during peak simulated load (proving the 20% home-channel slice)
+
+### How it works (what the injector actually does)
+```
+Stress test task (Core 1, priority 1)
+ ├─ Runs forever, gated by stressTestActive flag (runtime toggle)
+ ├─ When OFF:  sleeps 250ms ticks, ~0% CPU
+ └─ When ON:
+     ├─ Generates 50 fake deauth frames (type=0, subtype=12) / second
+     ├─ Drops them straight into the same FreeRTOS packet queue that the
+     │  real promiscuous-mode ISR feeds
+     └─ Feature extractor + ThreatAnalyzer score them exactly as if the radio saw them on-air
+```
+
+**No radio transmission.** The deauth frames never leave the ESP32 — they're pure in-memory pipeline injection (injectMetadata() enqueues Metadata structs via `xQueueSend(packetQueue)` — same queue the real RX ISR writes to).
+
+### Two build modes — when Stress Test is clickable
+| Environment | `ENABLE_STRESS_SIM` | Dashboard button | Behavior |
+|---|---|---|---|
+| `pio run -e core` (default release) | `0` | 🔒 Disabled, greyed out | Button shows the re-flash command. API endpoint `/stresstest` still responds (`stress_capable: false`) so the UI shows the banner correctly. |
+| `pio run -e internal` | `1` | ▶ Green / ⏸ Amber clickable toggle | Fully functional. Click **START STRESS TEST** → Threat Score climbs → CRITICAL → Threat Lock engages → Click **STOP STRESS TEST** → EMA decays back to SAFE. |
+
+### Quick Stress Test run (copy-paste workflow)
+```bash
+# 1. Flash internal build + filesystem
+pio run -e internal -t upload
+pio run -e internal -t uploadfs
+
+# 2. Connect to AP, open dashboard, sign in
+
+# 3. Click ▶ START STRESS TEST in the Stress Test panel (below Export Matrix)
+
+# 4. Within ~15s the following should happen:
+#    - Classification: SAFE → WARNING → RECONNAISSANCE → CRITICAL
+#    - Threat Score: 0 → ≥ 7.0
+#    - Radio: Auto-Hop → THREAT LOCK (auto-engaged at threshold)
+#    - Dashboard still updates every 2.5s (20% home slice)
+#    - Packets Processed counter climbs fast
+
+# 5. Click ⏸ STOP STRESS TEST
+
+# 6. EMA decays, Threat Score glides back to baseline automatically
+```
+
+### Direct API usage (for scripts / headless testing / CI)
+No browser? Drive the injector directly over HTTP (Basic Auth required for state changes):
+```bash
+# Check status (public, unauthenticated — GET /stresstest)
+curl -u admin:cybersentinel http://192.168.4.1/stresstest
+# → {"stress_capable":true,"stress_active":false,"stress_injected":0,...}
+
+# Turn ON (write-gated → requires auth)
+curl -u admin:cybersentinel "http://192.168.4.1/stresstest?state=on"
+
+# Turn OFF
+curl -u admin:cybersentinel "http://192.168.4.1/stresstest?state=off"
+```
+
+### Safety / Why it's behind a compile flag
+- Release (`core`) builds compile the stress simulator **OUT** so a bad actor who finds your AP+creds can't abuse the injector to self-DoS your monitoring pipeline. Flash `core` mode when you ship — the synthetic inject code path isn't even present in flash.
+- Flip `ENABLE_STRESS_SIM` manually in `config.h` if you want the button active but want to skip the `-e internal` env switch.
 
 ## Project Structure
 ```

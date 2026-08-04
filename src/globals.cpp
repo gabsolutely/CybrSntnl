@@ -1,5 +1,6 @@
 #include "globals.h"
 #include "config.h"
+#include <WiFi.h>
 
 // Allocate the actual memory for the externs
 ComponentStatus systemStatus = {0};
@@ -24,6 +25,10 @@ ChannelMode currentChannelMode = MODE_AUTO_HOP;
 uint8_t currentChannel = 1;
 uint8_t targetedThreatChannel = 1;
 unsigned long lastThreatSeenTime = 0;
+
+// Stress test / demo injector state (runtime-toggleable)
+volatile bool stressTestActive = false;
+volatile unsigned long stressTestInjectedPackets = 0;
 
 // Initialize the global state
 void initializeGlobals() {

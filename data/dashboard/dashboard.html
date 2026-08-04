@@ -146,6 +146,30 @@
       </div>
     </section>
 
+    <section class="stresstest-panel" id="stressTestPanel">
+      <h3>Stress Test</h3>
+      <p style="color: var(--muted); font-size: 13px; margin: 6px 0 14px 0;">
+        Inject synthetic deauth frames directly into the pipeline for demos and threshold tuning.
+        In-memory only, no radio transmission.
+      </p>
+
+      <div class="control-row">
+        <div style="flex:1;">
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button id="stressTestToggle" class="btn success" style="min-width: 180px; padding: 10px 16px;" onclick="toggleStressTest()">
+              ▶ START STRESS TEST
+            </button>
+            <div id="stressTestBadge" class="stresstest-badge stresstest-idle">IDLE</div>
+            <div class="stresstest-stats">
+              <span>Injected: <strong id="stressTestInjected">0</strong> pkts</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="stressTestHint" style="margin-top: 12px; display: none;"></div>
+    </section>
+
     <section class="stats-panel">
       <div class="section-title" style="font-weight: 600; font-size: 14px;">System Statistics</div>
       <div class="stats-grid">

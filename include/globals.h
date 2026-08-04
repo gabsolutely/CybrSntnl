@@ -33,6 +33,9 @@ extern uint8_t     currentChannel;
 extern uint8_t     targetedThreatChannel;
 extern unsigned long lastThreatSeenTime;
 
+extern volatile bool stressTestActive;
+extern volatile unsigned long stressTestInjectedPackets;
+
 // Single mutex for all shared state. Timeout-gated everywhere to avoid deadlock.
 extern SemaphoreHandle_t globalStateMutex;
 

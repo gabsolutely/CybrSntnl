@@ -248,7 +248,12 @@ function validateApiResponse(data) {
     
     // --- Frequency & Radio Configuration ---
     current_channel: safeNum(data.current_channel) || 1,
-    channel_mode:    typeof data.channel_mode === 'string' ? data.channel_mode.substring(0, 20) : 'UNKNOWN'
+    channel_mode:    typeof data.channel_mode === 'string' ? data.channel_mode.substring(0, 20) : 'UNKNOWN',
+
+    // --- Stress Test / Synthetic Injector ---
+    stress_capable:  !!data.stress_capable,
+    stress_active:   !!data.stress_active,
+    stress_injected: safeNum(data.stress_injected)
   };
   
   return validated;
@@ -355,6 +360,9 @@ async function fetchData() {
         }
         
         if (ui.totalEvents) ui.totalEvents.innerText = validatedData.packets_processed;
+
+        // --- Stress Test UI updates -----
+        updateStressTestUI(validatedData);
 
         updateHealthScore(validatedData);
         updateThreatHistory(validatedData);
@@ -752,5 +760,109 @@ async function handleChannelChange(value) {
     } catch (e) {
         console.error("Error updating channel configurations:", e);
         addLog("⚠️ Channel control sync failed");
+    }
+}
+
+// ============================================================================
+// STRESS TEST / PIPELINE SELF-TEST UI CONTROLLER
+// ============================================================================
+// Ties the toggle button to GET /stresstest?state=on|off and keeps the
+// panel state (idle vs active, counter, hint text) in sync with /data polls.
+//
+// Behavior:
+//   - INTERNAL builds:   stress_capable = true  → panel interactive
+//   - CORE builds:       stress_capable = false → panel shows "reflash" banner
+function updateStressTestUI(data) {
+    const panel     = document.getElementById('stressTestPanel');
+    const btn       = document.getElementById('stressTestToggle');
+    const badge     = document.getElementById('stressTestBadge');
+    const counterEl = document.getElementById('stressTestInjected');
+    const hintEl    = document.getElementById('stressTestHint');
+
+    if (!panel) return;
+
+    panel.style.display = 'block';
+
+    if (!data.stress_capable) {
+        if (btn) {
+            btn.innerText = "Injector disabled (CORE build)";
+            btn.disabled = true;
+            btn.classList.remove('btn-running');
+        }
+        if (badge) {
+            badge.className = 'stresstest-badge stresstest-unsupported';
+            badge.innerText = "UNSUPPORTED";
+        }
+        if (counterEl) counterEl.innerText = data.stress_injected.toLocaleString();
+        if (hintEl) {
+            hintEl.style.display = 'block';
+            hintEl.innerHTML =
+`⚡ Stress injector not compiled in this build. <code>ENABLE_STRESS_SIM</code> is 0 for release safety. Re-flash with the internal env: <code>pio run -e internal -t upload ; pio run -e internal -t uploadfs</code>`;
+        }
+        return;
+    }
+
+    if (btn) btn.disabled = false;
+    if (hintEl) hintEl.style.display = 'none';
+
+    if (data.stress_active) {
+        if (btn) {
+            btn.innerText = "⏸ STOP STRESS TEST";
+            btn.classList.add('btn-running');
+        }
+        if (badge) {
+            badge.className = 'stresstest-badge stresstest-active';
+            badge.innerText = "RUNNING";
+        }
+    } else {
+        if (btn) {
+            btn.innerText = "▶ START STRESS TEST";
+            btn.classList.remove('btn-running');
+        }
+        if (badge) {
+            badge.className = 'stresstest-badge stresstest-idle';
+            badge.innerText = "IDLE";
+        }
+    }
+
+    if (counterEl) counterEl.innerText = data.stress_injected.toLocaleString();
+}
+
+async function toggleStressTest() {
+    const btn = document.getElementById('stressTestToggle');
+    if (btn && btn.disabled) {
+        addLog("⚠️ Stress test unavailable in this CORE build — re-flash with 'internal' env.");
+        return;
+    }
+
+    // Read current state from the running class (matches CSS rule, robust to label wording)
+    const currentlyActive = (btn && btn.classList.contains('btn-running'));
+    const want = currentlyActive ? "off" : "on";
+
+    addLog(currentlyActive ? "🛑 Stopping stress test..." : "▶ Running stress test — threat score will climb.");
+
+    try {
+        const res = await fetch(`/stresstest?state=${encodeURIComponent(want)}`, {
+            method: 'GET',
+            cache: 'no-store'
+        });
+        const text = await res.text();
+        let d = null;
+        try { d = JSON.parse(text); } catch (_) {}
+
+        if (!res.ok) {
+            const msg = (d && d.message) ? d.message : `HTTP ${res.status}`;
+            addLog(`⚠️ Stress test API error: ${msg}`);
+            return;
+        }
+
+        if (d && d.message) addLog("✅ " + d.message);
+
+        // Immediate re-pull instead of waiting for the next 2.5s interval
+        fetchData();
+
+    } catch (e) {
+        console.error("Stress-test toggle error:", e);
+        addLog("⚠️ Stress test toggle failed — network error");
     }
 }

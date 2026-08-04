@@ -64,6 +64,7 @@ canvas {
     "info info"
     "charts charts"
     "controls controls"
+    "stresstest stresstest"
     "stats log";
 }
 
@@ -463,6 +464,7 @@ canvas {
       "info"
       "charts"
       "controls"
+      "stresstest"
       "stats"
       "log";
   }
@@ -475,4 +477,93 @@ canvas {
   .stats-grid { 
     grid-template-columns: 1fr; 
   }
+}
+
+/* =============================================================================
+   9. STRESS TEST / PIPELINE SELF-TEST PANEL
+   ============================================================================= */
+.stresstest-panel {
+  grid-area: stresstest;
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.stresstest-panel h3 {
+  margin: 0 0 4px 0;
+}
+
+.stresstest-badge {
+  display: inline-block;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-family: monospace;
+  background: var(--glass);
+  color: var(--muted);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+.stresstest-badge.stresstest-idle {
+  color: var(--ok);
+}
+
+.stresstest-badge.stresstest-active {
+  color: var(--elevated);
+  animation: stresstestPulse 1.2s infinite;
+}
+
+.stresstest-badge.stresstest-unsupported {
+  color: var(--muted);
+}
+
+@keyframes stresstestPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
+.stresstest-stats {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.stresstest-stats strong {
+  color: var(--text);
+}
+
+#stressTestHint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+#stressTestHint code {
+  font-family: monospace;
+  background: var(--glass);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+#stressTestToggle {
+  background: var(--ok);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.08);
+  transition: all 0.2s ease;
+}
+
+#stressTestToggle:hover {
+  filter: brightness(1.08);
+}
+
+#stressTestToggle.btn-running {
+  background: var(--elevated);
+}
+
+#stressTestToggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }

@@ -183,7 +183,7 @@ bool RadioIntake::processPackets() {
 }
 
 // =============================================================================
-// INJECT / SIMULATE METHODS (For testing & Chaos Mode)
+// INJECT / SIMULATE METHODS (For testing & Stress Test Mode)
 // =============================================================================
 bool RadioIntake::injectMetadata(const Metadata& meta) {
     if (packetQueue == nullptr) return false;

@@ -17,6 +17,7 @@
 // CS_MODE_CORE     / CS_MODE_INTERNAL are set via platformio.ini build flags.
 // Do NOT uncomment them here — the build system handles them per env.
 
+#define FW_VERSION                 "1.3.0"
 #define DEVELOPMENT_MODE 0    // 0 = release (clean logs, no debug spam)
 
 #if defined(CS_MODE_INTERNAL)
