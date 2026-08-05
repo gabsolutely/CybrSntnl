@@ -262,17 +262,45 @@ void Dashboard::handleData() {
 
     doc["uptime"] = millis() / 1000;
     doc["fw_version"] = FW_VERSION;
-    // Stress test / synthetic demo injector telemetry + capability flag
+    // Stress test / synthetic demo injector telemetry + capability flag + runtime config
     {
         extern volatile bool stressTestActive;
         extern volatile unsigned long stressTestInjectedPackets;
-        doc["stress_active"] = (bool)stressTestActive;
+        extern volatile uint32_t stressCfgRatePktPerSec;
+        extern volatile uint8_t  stressCfgAttackProfile;
+        extern volatile uint8_t  stressCfgFrameTypeMask;
+        extern volatile int8_t   stressCfgRssiMin;
+        extern volatile int8_t   stressCfgRssiMax;
+        extern volatile uint8_t  stressCfgMacRandomize;
+        extern volatile uint32_t stressCfgBurstOnMs;
+        extern volatile uint32_t stressCfgBurstOffMs;
+        extern volatile uint32_t stressCfgMicroburstOnMs;
+        extern volatile uint32_t stressCfgMicroburstOffMs;
+        extern volatile uint8_t  stressCfgSpreadChannels;
+        extern volatile uint32_t stressCfgLoopIterationMs;
+
+        doc["stress_active"]   = (bool)stressTestActive;
         doc["stress_injected"] = (uint32_t)stressTestInjectedPackets;
     #if ENABLE_STRESS_SIM
-        doc["stress_capable"] = true;
+        doc["stress_capable"]  = true;
     #else
-        doc["stress_capable"] = false;
+        doc["stress_capable"]  = false;
     #endif
+        // Runtime config — sentinel values (0 / 0xFF) on first boot mean the
+        // task will fall back to the config.h defaults. The dashboard reflects
+        // the effective values by reading defaults too when it sees sentinels.
+        doc["stress_cfg_rate"]         = (uint32_t)stressCfgRatePktPerSec;
+        doc["stress_cfg_profile"]      = (uint8_t)stressCfgAttackProfile;
+        doc["stress_cfg_mask"]         = (uint8_t)stressCfgFrameTypeMask;
+        doc["stress_cfg_rssi_min"]     = (int)stressCfgRssiMin;
+        doc["stress_cfg_rssi_max"]     = (int)stressCfgRssiMax;
+        doc["stress_cfg_mac_rand"]     = (uint8_t)stressCfgMacRandomize;
+        doc["stress_cfg_burst_on"]     = (uint32_t)stressCfgBurstOnMs;
+        doc["stress_cfg_burst_off"]    = (uint32_t)stressCfgBurstOffMs;
+        doc["stress_cfg_uburst_on"]    = (uint32_t)stressCfgMicroburstOnMs;
+        doc["stress_cfg_uburst_off"]   = (uint32_t)stressCfgMicroburstOffMs;
+        doc["stress_cfg_spread_ch"]    = (uint8_t)stressCfgSpreadChannels;
+        doc["stress_cfg_loop_ms"]      = (uint32_t)stressCfgLoopIterationMs;
     }
     // Map getPacketCount() to total lifetime packets processed
     doc["packets_processed"] = radioIntake.getPacketCount();
@@ -393,22 +421,49 @@ void Dashboard::handleHealth() {
 // =============================================================================
 // Runtime toggle for the internal deauth-flood simulator. Exposed so the
 // dashboard has a one-click demo button instead of needing a re-flash.
+// Handles the /stresstest endpoint. All parameters are OPTIONAL. Pass any
+// combination you want; omitted fields keep their previous value.
 //
-// Query parameters (all optional):
-//   ?state=1 | on   -> enable stress injector
-//   ?state=0 | off  -> disable
-//   (no args)       -> read-only JSON status
+// Query parameters (auth-required for any field that changes state or config):
+//   state=1|on|true  / state=0|off|false → toggle the injector
+//   rate=<uint>                         → target pkt/sec
+//   profile=<0..3>                      → attack profile (see config.h 3B)
+//   mask=<uint8>                        → frame-type bitmask (see config.h 3B)
+//   rssi_min=<int>                      → dBm
+//   rssi_max=<int>                      → dBm
+//   mac_rand=<0|1>                      → 1 = randomize src/dst hashes per pkt
+//   burst_on=<uint ms>                  → BURSTY on-time
+//   burst_off=<uint ms>                 → BURSTY off-time
+//   uburst_on=<uint ms>                 → MICROBURST on-time
+//   uburst_off=<uint ms>                → MICROBURST off-time
+//   spread_ch=<0|1>                     → 1 = vary channel ±2
+//   loop_ms=<uint ms>                   → outer loop cadence
+//
+// (no args) — returns JSON status only (read-only, like /health)
 //
 // Examples:
-//   GET /stresstest?state=on    // enable (WRITE-protected → needs auth)
-//   GET /stresstest?state=off   // disable
-//   GET /stresstest             // status (also public like /health — no state change)
+//   GET /stresstest?state=on&rate=120&profile=2
+//   GET /stresstest?mask=15&rssi_min=-70&rssi_max=-30&mac_rand=1
+//   GET /stresstest
 void Dashboard::handleStressTest() {
     if (!globalInstance || !globalInstance->server) return;
     WebServer* srv = globalInstance->server;
 
     extern volatile bool stressTestActive;
     extern volatile unsigned long stressTestInjectedPackets;
+
+    extern volatile uint32_t stressCfgRatePktPerSec;
+    extern volatile uint8_t  stressCfgAttackProfile;
+    extern volatile uint8_t  stressCfgFrameTypeMask;
+    extern volatile int8_t   stressCfgRssiMin;
+    extern volatile int8_t   stressCfgRssiMax;
+    extern volatile uint8_t  stressCfgMacRandomize;
+    extern volatile uint32_t stressCfgBurstOnMs;
+    extern volatile uint32_t stressCfgBurstOffMs;
+    extern volatile uint32_t stressCfgMicroburstOnMs;
+    extern volatile uint32_t stressCfgMicroburstOffMs;
+    extern volatile uint8_t  stressCfgSpreadChannels;
+    extern volatile uint32_t stressCfgLoopIterationMs;
 
     JsonDocument doc;
 
@@ -419,17 +474,31 @@ void Dashboard::handleStressTest() {
     const bool capable = false;
 #endif
     doc["stress_capable"] = capable;
-    doc["stress_active"]  = (bool)stressTestActive;
 
-    // —— State change request —— //
-    if (srv->hasArg("state")) {
-        // Write-gate this. Read-only status above is unauthed.
+    // —— Build the list of fields the caller actually wants to change —— //
+    // A write (state change or ANY config update) requires auth. Read-only
+    // status is always allowed (same open semantics as /health).
+    const bool wantsState    = srv->hasArg("state");
+    const bool wantsRate     = srv->hasArg("rate");
+    const bool wantsProfile  = srv->hasArg("profile");
+    const bool wantsMask     = srv->hasArg("mask");
+    const bool wantsRssiMin  = srv->hasArg("rssi_min");
+    const bool wantsRssiMax  = srv->hasArg("rssi_max");
+    const bool wantsMacRand  = srv->hasArg("mac_rand");
+    const bool wantsBurstOn  = srv->hasArg("burst_on");
+    const bool wantsBurstOff = srv->hasArg("burst_off");
+    const bool wantsUBurstOn = srv->hasArg("uburst_on");
+    const bool wantsUBurstOff= srv->hasArg("uburst_off");
+    const bool wantsSpreadCh = srv->hasArg("spread_ch");
+    const bool wantsLoopMs   = srv->hasArg("loop_ms");
+
+    const bool wantsWrite = wantsState || wantsRate || wantsProfile || wantsMask
+                         || wantsRssiMin || wantsRssiMax || wantsMacRand
+                         || wantsBurstOn || wantsBurstOff || wantsUBurstOn
+                         || wantsUBurstOff || wantsSpreadCh || wantsLoopMs;
+
+    if (wantsWrite) {
         if (!authorizeRequest(true)) return;
-
-        String st = srv->arg("state");
-        st.toLowerCase();
-        bool want = (st == "1" || st == "on" || st == "true");
-
         if (!capable) {
             doc["result"]  = "error";
             doc["message"] = "Stress injector not compiled. Flash with 'internal' env (ENABLE_STRESS_SIM=1) or modify config.h.";
@@ -438,23 +507,130 @@ void Dashboard::handleStressTest() {
             srv->send(400, "application/json", out);
             return;
         }
+    }
 
+    // Apply each requested field (if any)
+    String changedList = "";
+    bool stateChangeReported = false;
+
+    if (wantsState) {
+        String st = srv->arg("state");
+        st.toLowerCase();
+        bool want = (st == "1" || st == "on" || st == "true");
         stressTestActive = want;
         if (want) {
             Serial.println("[StressTest] DASHBOARD TRIGGERED — synthetic injector ON");
-            doc["result"]  = "enabled";
-            doc["message"] = "Simulated deauth flood running. Watch threat score climb.";
         } else {
             Serial.println("[StressTest] Dashboard cleared — synthetic injector OFF");
-            doc["result"]  = "disabled";
-            doc["message"] = "Injector stopped. Let threat EMA decay back to baseline.";
+        }
+        changedList += want ? "state=on " : "state=off ";
+        stateChangeReported = true;
+    }
+    if (wantsRate) {
+        uint32_t v = srv->arg("rate").toInt();
+        if (v < 1) v = 1;
+        stressCfgRatePktPerSec = v;
+        changedList += "rate=" + String(v) + " ";
+    }
+    if (wantsProfile) {
+        long v = srv->arg("profile").toInt();
+        if (v < 0) v = 0;
+        if (v > 3) v = 3;
+        stressCfgAttackProfile = (uint8_t)v;
+        changedList += "profile=" + String(v) + " ";
+    }
+    if (wantsMask) {
+        long v = srv->arg("mask").toInt();
+        if (v < 0) v = 0;
+        if (v > 15) v = 15;
+        stressCfgFrameTypeMask = (uint8_t)v;
+        changedList += "mask=" + String(v) + " ";
+    }
+    if (wantsRssiMin) {
+        long v = srv->arg("rssi_min").toInt();
+        if (v < -110) v = -110;
+        if (v > 0)    v = 0;
+        stressCfgRssiMin = (int8_t)v;
+        changedList += "rssi_min=" + String(v) + " ";
+    }
+    if (wantsRssiMax) {
+        long v = srv->arg("rssi_max").toInt();
+        if (v < -110) v = -110;
+        if (v > 0)    v = 0;
+        stressCfgRssiMax = (int8_t)v;
+        changedList += "rssi_max=" + String(v) + " ";
+    }
+    if (wantsMacRand) {
+        long v = srv->arg("mac_rand").toInt();
+        stressCfgMacRandomize = (uint8_t)(v ? 1 : 0);
+        changedList += "mac_rand=" + String(stressCfgMacRandomize) + " ";
+    }
+    if (wantsBurstOn) {
+        uint32_t v = srv->arg("burst_on").toInt();
+        if (v < 1) v = 1;
+        stressCfgBurstOnMs = v;
+        changedList += "burst_on=" + String(v) + " ";
+    }
+    if (wantsBurstOff) {
+        uint32_t v = srv->arg("burst_off").toInt();
+        if (v < 1) v = 1;
+        stressCfgBurstOffMs = v;
+        changedList += "burst_off=" + String(v) + " ";
+    }
+    if (wantsUBurstOn) {
+        uint32_t v = srv->arg("uburst_on").toInt();
+        if (v < 1) v = 1;
+        stressCfgMicroburstOnMs = v;
+        changedList += "uburst_on=" + String(v) + " ";
+    }
+    if (wantsUBurstOff) {
+        uint32_t v = srv->arg("uburst_off").toInt();
+        if (v < 1) v = 1;
+        stressCfgMicroburstOffMs = v;
+        changedList += "uburst_off=" + String(v) + " ";
+    }
+    if (wantsSpreadCh) {
+        long v = srv->arg("spread_ch").toInt();
+        stressCfgSpreadChannels = (uint8_t)(v ? 1 : 0);
+        changedList += "spread_ch=" + String(stressCfgSpreadChannels) + " ";
+    }
+    if (wantsLoopMs) {
+        uint32_t v = srv->arg("loop_ms").toInt();
+        if (v < 1) v = 1;
+        stressCfgLoopIterationMs = v;
+        changedList += "loop_ms=" + String(v) + " ";
+    }
+
+    // Echo active state back regardless of whether it was touched
+    doc["stress_active"]   = (bool)stressTestActive;
+    doc["stress_injected"] = (uint32_t)stressTestInjectedPackets;
+    doc["stress_cfg_rate"]       = (uint32_t)stressCfgRatePktPerSec;
+    doc["stress_cfg_profile"]    = (uint8_t)stressCfgAttackProfile;
+    doc["stress_cfg_mask"]       = (uint8_t)stressCfgFrameTypeMask;
+    doc["stress_cfg_rssi_min"]   = (int)stressCfgRssiMin;
+    doc["stress_cfg_rssi_max"]   = (int)stressCfgRssiMax;
+    doc["stress_cfg_mac_rand"]   = (uint8_t)stressCfgMacRandomize;
+    doc["stress_cfg_burst_on"]   = (uint32_t)stressCfgBurstOnMs;
+    doc["stress_cfg_burst_off"]  = (uint32_t)stressCfgBurstOffMs;
+    doc["stress_cfg_uburst_on"]  = (uint32_t)stressCfgMicroburstOnMs;
+    doc["stress_cfg_uburst_off"] = (uint32_t)stressCfgMicroburstOffMs;
+    doc["stress_cfg_spread_ch"]  = (uint8_t)stressCfgSpreadChannels;
+    doc["stress_cfg_loop_ms"]    = (uint32_t)stressCfgLoopIterationMs;
+
+    if (wantsWrite) {
+        doc["result"]  = "ok";
+        if (stateChangeReported && stressTestActive) {
+            doc["message"] = "Injector running. Applied: " + changedList;
+        } else if (stateChangeReported) {
+            doc["message"] = "Injector stopped. Applied: " + changedList;
+        } else {
+            doc["message"] = "Config updated (no state change). Applied: " + changedList;
         }
     } else {
         doc["result"]  = "status";
-        doc["message"] = "No state change requested. Pass ?state=on or ?state=off.";
+        doc["message"] = "Read-only. Pass ?state=on, ?rate=N, ?profile=N, ?mask=N, etc. All params optional; auth required for writes.";
     }
 
-    doc["stress_injected"] = (uint32_t)stressTestInjectedPackets;
     String out; serializeJson(doc, out);
     srv->send(200, "application/json", out);
 }

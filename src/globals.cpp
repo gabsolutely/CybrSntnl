@@ -30,6 +30,22 @@ unsigned long lastThreatSeenTime = 0;
 volatile bool stressTestActive = false;
 volatile unsigned long stressTestInjectedPackets = 0;
 
+// Stress test runtime config. Values initialized to 0 so the task falls
+// back to config.h STRESS_DEFAULT_* on first run, until the dashboard
+// overrides them via /stresstest query params.
+volatile uint32_t stressCfgRatePktPerSec   = 0;
+volatile uint8_t  stressCfgAttackProfile   = 0xFF; // sentinel: use default
+volatile uint8_t  stressCfgFrameTypeMask   = 0xFF;
+volatile int8_t   stressCfgRssiMin         = 0;
+volatile int8_t   stressCfgRssiMax         = 0;
+volatile uint8_t  stressCfgMacRandomize    = 0xFF;
+volatile uint32_t stressCfgBurstOnMs       = 0;
+volatile uint32_t stressCfgBurstOffMs      = 0;
+volatile uint32_t stressCfgMicroburstOnMs  = 0;
+volatile uint32_t stressCfgMicroburstOffMs = 0;
+volatile uint8_t  stressCfgSpreadChannels  = 0xFF;
+volatile uint32_t stressCfgLoopIterationMs = 0;
+
 // Initialize the global state
 void initializeGlobals() {
     // Allocate the hardware mutex before anything tries to use it

@@ -66,17 +66,30 @@ TaskHandle_t spiffsRetryTaskHandle = NULL;
 // FREE RTOS TASKS
 // =============================================================================
 
-// Temporary stress-test task
-// Assuming your ring buffer handle is declared globally somewhere as:
-// extern RingbufHandle_t buf_handle; 
-
 void taskStressTest(void *pvParameters) {
     extern RadioIntake* g_radioIntakeInstance;
     extern volatile bool stressTestActive;
     extern volatile unsigned long stressTestInjectedPackets;
-    
+
+    extern volatile uint32_t stressCfgRatePktPerSec;
+    extern volatile uint8_t  stressCfgAttackProfile;
+    extern volatile uint8_t  stressCfgFrameTypeMask;
+    extern volatile int8_t   stressCfgRssiMin;
+    extern volatile int8_t   stressCfgRssiMax;
+    extern volatile uint8_t  stressCfgMacRandomize;
+    extern volatile uint32_t stressCfgBurstOnMs;
+    extern volatile uint32_t stressCfgBurstOffMs;
+    extern volatile uint32_t stressCfgMicroburstOnMs;
+    extern volatile uint32_t stressCfgMicroburstOffMs;
+    extern volatile uint8_t  stressCfgSpreadChannels;
+    extern volatile uint32_t stressCfgLoopIterationMs;
+
     Serial.println("[StressTest] Control task ready. Dashboard toggle: OFF (idle)");
-    
+
+    uint32_t profileTick = 0;
+    uint8_t lastProfile = 0xFF;
+    bool burstPhaseOn = true;
+
     for (;;) {
         if (!stressTestActive) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -84,31 +97,162 @@ void taskStressTest(void *pvParameters) {
         }
 
 #if ENABLE_STRESS_SIM
-        if (g_radioIntakeInstance != nullptr) {
-            
-            for (int i = 0; i < 50; i++) {
+        if (g_radioIntakeInstance == nullptr) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
+
+        const uint32_t cfgRate         = (stressCfgRatePktPerSec   > 0)   ? stressCfgRatePktPerSec   : STRESS_DEFAULT_RATE_PKTS_PER_SEC;
+        const uint8_t  cfgProfile      = (stressCfgAttackProfile   != 0xFF) ? stressCfgAttackProfile  : STRESS_DEFAULT_ATTACK_PROFILE;
+        const uint8_t  cfgMask         = (stressCfgFrameTypeMask   != 0xFF) ? stressCfgFrameTypeMask  : STRESS_DEFAULT_FRAME_TYPE_MASK;
+        const int8_t   cfgRssiMin      = (stressCfgRssiMin         != 0)   ? stressCfgRssiMin        : STRESS_DEFAULT_RSSI_MIN;
+        const int8_t   cfgRssiMax      = (stressCfgRssiMax         != 0)   ? stressCfgRssiMax        : STRESS_DEFAULT_RSSI_MAX;
+        const uint8_t  cfgMacRand      = (stressCfgMacRandomize    != 0xFF) ? stressCfgMacRandomize   : STRESS_DEFAULT_MAC_RANDOMIZE;
+        const uint32_t cfgBurstOn      = (stressCfgBurstOnMs       > 0)   ? stressCfgBurstOnMs       : STRESS_DEFAULT_BURST_ON_MS;
+        const uint32_t cfgBurstOff     = (stressCfgBurstOffMs      > 0)   ? stressCfgBurstOffMs      : STRESS_DEFAULT_BURST_OFF_MS;
+        const uint32_t cfgUBurstOn     = (stressCfgMicroburstOnMs  > 0)   ? stressCfgMicroburstOnMs  : STRESS_DEFAULT_MICROBURST_ON_MS;
+        const uint32_t cfgUBurstOff    = (stressCfgMicroburstOffMs > 0)   ? stressCfgMicroburstOffMs : STRESS_DEFAULT_MICROBURST_OFF_MS;
+        const uint8_t  cfgSpreadCh     = (stressCfgSpreadChannels  != 0xFF) ? stressCfgSpreadChannels  : STRESS_DEFAULT_SPREAD_CHANNELS;
+        const uint32_t cfgLoopMs       = (stressCfgLoopIterationMs > 0)   ? stressCfgLoopIterationMs : STRESS_DEFAULT_LOOP_ITERATION_MS;
+
+        if (cfgProfile != lastProfile) {
+            lastProfile = cfgProfile;
+            profileTick = 0;
+            burstPhaseOn = true;
+        }
+
+        const uint32_t interPktDelayUs = (1000000UL / cfgRate);
+
+        const uint32_t loopStart = millis();
+        profileTick += cfgLoopMs;
+
+        bool injectAllowed = true;
+        switch (cfgProfile) {
+            case 0:
+                injectAllowed = true;
+                break;
+            case 1: {
+                const uint32_t cycle = cfgBurstOn + cfgBurstOff;
+                const uint32_t t = profileTick % cycle;
+                injectAllowed = (t < cfgBurstOn);
+                break;
+            }
+            case 2: {
+                const uint32_t cycle = cfgUBurstOn + cfgUBurstOff;
+                const uint32_t t = profileTick % cycle;
+                injectAllowed = (t < cfgUBurstOn);
+                break;
+            }
+            case 3: {
+                const uint32_t cycle = cfgUBurstOn + cfgUBurstOff;
+                const uint32_t t = profileTick % cycle;
+                injectAllowed = (t < cfgUBurstOn);
+                break;
+            }
+            default:
+                injectAllowed = true;
+                break;
+        }
+
+        if (injectAllowed) {
+            uint32_t packetsThisIter = (cfgRate * cfgLoopMs) / 1000UL;
+            if (packetsThisIter < 1) packetsThisIter = 1;
+            if (packetsThisIter > 5000) packetsThisIter = 5000;
+
+            for (uint32_t i = 0; i < packetsThisIter; i++) {
+                if (!stressTestActive) break;
+
                 Metadata fakePacket;
-                
                 fakePacket.ts = millis();
-                fakePacket.rssi = random(-85, -40);
-                fakePacket.channel = WiFi.channel();
-                fakePacket.frame_type = 0;    // 802.11 Management Frame Type
-                fakePacket.subtype = 12;      // Deauth Subtype (0x0C)
-                fakePacket.length = 26;
-                fakePacket.hashed_src_mac = 4294967295U; 
-                fakePacket.hashed_dst_mac = 1234567890U;
-                fakePacket.ssid[0] = '\0'; 
+
+                int8_t rLo = cfgRssiMin;
+                int8_t rHi = cfgRssiMax;
+                if (rLo > rHi) { int8_t t = rLo; rLo = rHi; rHi = t; }
+                int rssiRange = (int)rHi - (int)rLo + 1;
+                if (rssiRange <= 0) rssiRange = 1;
+                fakePacket.rssi = (int8_t)((int)rLo + (random() % rssiRange));
+
+                uint8_t baseCh = WiFi.channel();
+                if (baseCh == 0) baseCh = HOME_CHANNEL;
+                if (cfgSpreadCh) {
+                    int off = (random() % 5) - 2;
+                    int ch = (int)baseCh + off;
+                    if (ch < 1) ch = 1;
+                    if (ch > 13) ch = 13;
+                    fakePacket.channel = (uint8_t)ch;
+                } else {
+                    fakePacket.channel = baseCh;
+                }
+
+                fakePacket.frame_type = 0;
+
+                uint8_t effectiveMask = cfgMask;
+                if (cfgProfile == 3) {
+                    uint8_t r = (uint8_t)(random() & 0x0F);
+                    effectiveMask = (uint8_t)(1u << (r & 3u));
+                }
+                if (effectiveMask == 0) effectiveMask = 1;
+
+                uint8_t subtype = 0x0C;
+                bool picked = false;
+                for (uint8_t bit = 0; bit < 4 && !picked; bit++) {
+                    if (effectiveMask & (1u << bit)) {
+                        if ((random() & 7u) <= 3u || bit == 3) {
+                            switch (bit) {
+                                case 0: subtype = 0x0C; break;
+                                case 1: subtype = 0x0A; break;
+                                case 2: subtype = 0x00; break;
+                                case 3: subtype = 0x04; break;
+                            }
+                            picked = true;
+                        }
+                    }
+                }
+                if (!picked) {
+                    if (effectiveMask & 1)        subtype = 0x0C;
+                    else if (effectiveMask & 2)   subtype = 0x0A;
+                    else if (effectiveMask & 4)   subtype = 0x00;
+                    else if (effectiveMask & 8)   subtype = 0x04;
+                }
+                fakePacket.subtype = subtype;
+
+                switch (subtype) {
+                    case 0x00: fakePacket.length = 34; break;
+                    case 0x04: fakePacket.length = random(40, 200); break;
+                    case 0x0A: fakePacket.length = 24; break;
+                    case 0x0C: fakePacket.length = 26; break;
+                    default:   fakePacket.length = 26; break;
+                }
+
+                if (cfgMacRand) {
+                    fakePacket.hashed_src_mac = (uint32_t)random();
+                    fakePacket.hashed_src_mac |= ((uint32_t)random() & 0x7FFF) << 16;
+                    fakePacket.hashed_dst_mac = (uint32_t)random();
+                    fakePacket.hashed_dst_mac |= ((uint32_t)random() & 0x7FFF) << 16;
+                } else {
+                    fakePacket.hashed_src_mac = 4294967295U;
+                    fakePacket.hashed_dst_mac = 1234567890U;
+                }
+
+                fakePacket.ssid[0] = '\0';
 
                 if (g_radioIntakeInstance->injectMetadata(fakePacket)) {
                     stressTestInjectedPackets++;
                 }
 
-                vTaskDelay(pdMS_TO_TICKS(2)); 
+                if (interPktDelayUs >= 1000) {
+                    vTaskDelay(pdMS_TO_TICKS(interPktDelayUs / 1000UL));
+                } else if (interPktDelayUs >= 100) {
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                }
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        uint32_t elapsed = millis() - loopStart;
+        if (elapsed < cfgLoopMs) {
+            vTaskDelay(pdMS_TO_TICKS(cfgLoopMs - elapsed));
+        }
 #else
-        // Stress sim not compiled in — keep the task alive so the API always reports state correctly.
         vTaskDelay(pdMS_TO_TICKS(500));
 #endif
     }

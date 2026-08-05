@@ -253,10 +253,180 @@ function validateApiResponse(data) {
     // --- Stress Test / Synthetic Injector ---
     stress_capable:  !!data.stress_capable,
     stress_active:   !!data.stress_active,
-    stress_injected: safeNum(data.stress_injected)
+    stress_injected: safeNum(data.stress_injected),
+    stress_cfg_rate:       safeNum(data.stress_cfg_rate),
+    stress_cfg_profile:    safeNum(data.stress_cfg_profile),
+    stress_cfg_mask:       safeNum(data.stress_cfg_mask),
+    stress_cfg_rssi_min:   (typeof data.stress_cfg_rssi_min === 'number') ? parseInt(data.stress_cfg_rssi_min) : -85,
+    stress_cfg_rssi_max:   (typeof data.stress_cfg_rssi_max === 'number') ? parseInt(data.stress_cfg_rssi_max) : -40,
+    stress_cfg_mac_rand:   safeNum(data.stress_cfg_mac_rand),
+    stress_cfg_burst_on:   safeNum(data.stress_cfg_burst_on),
+    stress_cfg_burst_off:  safeNum(data.stress_cfg_burst_off),
+    stress_cfg_uburst_on:  safeNum(data.stress_cfg_uburst_on),
+    stress_cfg_uburst_off: safeNum(data.stress_cfg_uburst_off),
+    stress_cfg_spread_ch:  safeNum(data.stress_cfg_spread_ch),
+    stress_cfg_loop_ms:    safeNum(data.stress_cfg_loop_ms)
   };
-  
+
   return validated;
+}
+
+const STRESS_DEFAULTS = {
+  rate:       50,
+  profile:    0,
+  mask:       1,
+  rssi_min:   -85,
+  rssi_max:   -40,
+  mac_rand:   0,
+  burst_on:   3000,
+  burst_off:  1000,
+  uburst_on:  1200,
+  uburst_off: 4000,
+  spread_ch:  0,
+  loop_ms:    1000
+};
+
+function eff(v, sentinel, def) {
+  if (v === undefined || v === null || v === sentinel) return def;
+  return v;
+}
+
+function onStressRateChange(val) {
+  const lbl = document.getElementById('rateLabel');
+  if (lbl) lbl.innerText = val + ' pkt/s';
+}
+
+function frameMaskFromUI() {
+  let m = 0;
+  if (document.getElementById('ftDeauth')?.checked)    m |= 1;
+  if (document.getElementById('ftDisassoc')?.checked)  m |= 2;
+  if (document.getElementById('ftAssoc')?.checked)     m |= 4;
+  if (document.getElementById('ftProbe')?.checked)     m |= 8;
+  return m || 1;
+}
+
+function applyFrameMaskToUI(mask) {
+  if (!mask) mask = 1;
+  const el = (id) => document.getElementById(id);
+  if (el('ftDeauth'))    el('ftDeauth').checked    = !!(mask & 1);
+  if (el('ftDisassoc'))  el('ftDisassoc').checked  = !!(mask & 2);
+  if (el('ftAssoc'))     el('ftAssoc').checked     = !!(mask & 4);
+  if (el('ftProbe'))     el('ftProbe').checked     = !!(mask & 8);
+}
+
+function collectStressParamsFromUI() {
+  const el = (id) => document.getElementById(id);
+  return {
+    rate:       parseInt(el('stressRate')?.value || STRESS_DEFAULTS.rate),
+    profile:    parseInt(el('stressProfile')?.value || STRESS_DEFAULTS.profile),
+    mask:       frameMaskFromUI(),
+    rssi_min:   parseInt(el('rssiMin')?.value || STRESS_DEFAULTS.rssi_min),
+    rssi_max:   parseInt(el('rssiMax')?.value || STRESS_DEFAULTS.rssi_max),
+    mac_rand:   el('macRand')?.checked ? 1 : 0,
+    burst_on:   parseInt(el('burstOn')?.value || STRESS_DEFAULTS.burst_on),
+    burst_off:  parseInt(el('burstOff')?.value || STRESS_DEFAULTS.burst_off),
+    uburst_on:  parseInt(el('uburstOn')?.value || STRESS_DEFAULTS.uburst_on),
+    uburst_off: parseInt(el('uburstOff')?.value || STRESS_DEFAULTS.uburst_off),
+    spread_ch:  el('spreadCh')?.checked ? 1 : 0,
+    loop_ms:    parseInt(el('stressLoop')?.value || STRESS_DEFAULTS.loop_ms)
+  };
+}
+
+let stressSubmitTimer = null;
+function submitStressConfig() {
+  if (stressSubmitTimer) clearTimeout(stressSubmitTimer);
+  stressSubmitTimer = setTimeout(_submitStressNow, 350);
+}
+
+async function _submitStressNow() {
+  const p = collectStressParamsFromUI();
+  const qs = new URLSearchParams({
+    rate: p.rate,
+    profile: p.profile,
+    mask: p.mask,
+    rssi_min: p.rssi_min,
+    rssi_max: p.rssi_max,
+    mac_rand: p.mac_rand,
+    burst_on: p.burst_on,
+    burst_off: p.burst_off,
+    uburst_on: p.uburst_on,
+    uburst_off: p.uburst_off,
+    spread_ch: p.spread_ch,
+    loop_ms: p.loop_ms
+  });
+  try {
+    const res = await fetch(`/stresstest?${qs.toString()}`, { method: 'GET', cache: 'no-store' });
+    const text = await res.text();
+    let d = null;
+    try { d = JSON.parse(text); } catch (_) {}
+    if (!res.ok) {
+      const msg = (d && d.message) ? d.message : `HTTP ${res.status}`;
+      addLog(`⚠️ Stress config error: ${msg}`);
+    }
+    fetchData();
+  } catch (e) {
+    console.error('Stress config submit error:', e);
+  }
+}
+
+function applyPreset(which) {
+  const el = (id) => document.getElementById(id);
+  let preset;
+  switch (which) {
+    case 'handshake':
+      preset = {
+        rate: 120, profile: 2, mask: 1,
+        rssi_min: -80, rssi_max: -45,
+        mac_rand: 0,
+        burst_on: 3000, burst_off: 1000,
+        uburst_on: 1200, uburst_off: 4000,
+        spread_ch: 0, loop_ms: 1000,
+        label: '🎯 Handshake Grabber preset'
+      };
+      break;
+    case 'coffeeshop':
+      preset = {
+        rate: 450, profile: 0, mask: 15,
+        rssi_min: -75, rssi_max: -35,
+        mac_rand: 1,
+        burst_on: 3000, burst_off: 1000,
+        uburst_on: 1200, uburst_off: 4000,
+        spread_ch: 0, loop_ms: 1000,
+        label: '☕ Noisy Coffee Shop preset'
+      };
+      break;
+    case 'classroom':
+    default:
+      preset = {
+        rate: 30, profile: 0, mask: 1,
+        rssi_min: -85, rssi_max: -40,
+        mac_rand: 0,
+        burst_on: 3000, burst_off: 1000,
+        uburst_on: 1200, uburst_off: 4000,
+        spread_ch: 0, loop_ms: 1000,
+        label: '🏫 Classroom Safe preset'
+      };
+      break;
+  }
+
+  if (el('stressRate'))  { el('stressRate').value  = preset.rate;  onStressRateChange(preset.rate); }
+  if (el('stressProfile')) el('stressProfile').value = preset.profile;
+  applyFrameMaskToUI(preset.mask);
+  if (el('rssiMin'))  el('rssiMin').value  = preset.rssi_min;
+  if (el('rssiMax'))  el('rssiMax').value  = preset.rssi_max;
+  if (el('macRand'))  el('macRand').checked  = !!preset.mac_rand;
+  if (el('burstOn'))  el('burstOn').value  = preset.burst_on;
+  if (el('burstOff')) el('burstOff').value = preset.burst_off;
+  if (el('uburstOn')) el('uburstOn').value = preset.uburst_on;
+  if (el('uburstOff'))el('uburstOff').value= preset.uburst_off;
+  if (el('spreadCh')) el('spreadCh').checked = !!preset.spread_ch;
+  if (el('stressLoop')){
+    el('stressLoop').value = preset.loop_ms;
+    const lbl = document.getElementById('loopLabel');
+    if (lbl) lbl.innerText = preset.loop_ms + ' ms';
+  }
+  addLog(preset.label + ' applied — click START to run.');
+  submitStressConfig();
 }
 
 // fetch and display data
@@ -772,34 +942,84 @@ async function handleChannelChange(value) {
 // Behavior:
 //   - INTERNAL builds:   stress_capable = true  → panel interactive
 //   - CORE builds:       stress_capable = false → panel shows "reflash" banner
+let lastHydratedCfgSig = '';
+
 function updateStressTestUI(data) {
-    const panel     = document.getElementById('stressTestPanel');
-    const btn       = document.getElementById('stressTestToggle');
-    const badge     = document.getElementById('stressTestBadge');
-    const counterEl = document.getElementById('stressTestInjected');
-    const hintEl    = document.getElementById('stressTestHint');
+    const panel        = document.getElementById('stressTestPanel');
+    const btn          = document.getElementById('stressTestToggle');
+    const badge        = document.getElementById('stressTestBadge');
+    const counterEl    = document.getElementById('stressTestInjected');
+    const hintEl       = document.getElementById('stressTestHint');
+    const controlsGrid = document.getElementById('stressControlsGrid');
 
     if (!panel) return;
 
     panel.style.display = 'block';
 
     if (!data.stress_capable) {
+        // Core build: show empty/grey banner, hide entire enabled UI, no half-disabled controls
+        const banner = document.getElementById('stressDisabledBanner');
+        const wrap   = document.getElementById('stressEnabledWrap');
+        if (banner) banner.style.display = 'flex';
+        if (wrap)   wrap.style.display   = 'none';
+
+        // Hide/hide the injected-count hint and old button entirely
         if (btn) {
-            btn.innerText = "Injector disabled (CORE build)";
+            btn.style.display = 'none';
             btn.disabled = true;
-            btn.classList.remove('btn-running');
         }
         if (badge) {
             badge.className = 'stresstest-badge stresstest-unsupported';
             badge.innerText = "UNSUPPORTED";
         }
         if (counterEl) counterEl.innerText = data.stress_injected.toLocaleString();
-        if (hintEl) {
-            hintEl.style.display = 'block';
-            hintEl.innerHTML =
-`⚡ Stress injector not compiled in this build. <code>ENABLE_STRESS_SIM</code> is 0 for release safety. Re-flash with the internal env: <code>pio run -e internal -t upload ; pio run -e internal -t uploadfs</code>`;
-        }
+        if (hintEl) hintEl.style.display = 'none';
+        if (controlsGrid) controlsGrid.style.display = 'none';
         return;
+    }
+
+    // Internal build: show the enabled panel, hide disabled banner
+    const banner = document.getElementById('stressDisabledBanner');
+    const wrap   = document.getElementById('stressEnabledWrap');
+    if (banner) banner.style.display = 'none';
+    if (wrap)   wrap.style.display   = '';
+
+    const rate       = eff(data.stress_cfg_rate,       0,    STRESS_DEFAULTS.rate);
+    const profile    = eff(data.stress_cfg_profile,    255,  STRESS_DEFAULTS.profile);
+    const mask       = eff(data.stress_cfg_mask,       255,  STRESS_DEFAULTS.mask);
+    const rssi_min   = eff(data.stress_cfg_rssi_min,   0,    STRESS_DEFAULTS.rssi_min);
+    const rssi_max   = eff(data.stress_cfg_rssi_max,   0,    STRESS_DEFAULTS.rssi_max);
+    const mac_rand   = eff(data.stress_cfg_mac_rand,   255,  STRESS_DEFAULTS.mac_rand);
+    const burst_on   = eff(data.stress_cfg_burst_on,   0,    STRESS_DEFAULTS.burst_on);
+    const burst_off  = eff(data.stress_cfg_burst_off,  0,    STRESS_DEFAULTS.burst_off);
+    const uburst_on  = eff(data.stress_cfg_uburst_on,  0,    STRESS_DEFAULTS.uburst_on);
+    const uburst_off = eff(data.stress_cfg_uburst_off, 0,    STRESS_DEFAULTS.uburst_off);
+    const spread_ch  = eff(data.stress_cfg_spread_ch,  255,  STRESS_DEFAULTS.spread_ch);
+    const loop_ms    = eff(data.stress_cfg_loop_ms,    0,    STRESS_DEFAULTS.loop_ms);
+
+    const cfgSig = [rate,profile,mask,rssi_min,rssi_max,mac_rand,burst_on,burst_off,uburst_on,uburst_off,spread_ch,loop_ms].join('|');
+    if (cfgSig !== lastHydratedCfgSig) {
+        lastHydratedCfgSig = cfgSig;
+        const el = (id) => document.getElementById(id);
+        if (el('stressRate')) {
+            el('stressRate').value = rate;
+            onStressRateChange(rate);
+        }
+        if (el('stressProfile')) el('stressProfile').value = String(profile);
+        applyFrameMaskToUI(mask);
+        if (el('rssiMin'))  el('rssiMin').value  = rssi_min;
+        if (el('rssiMax'))  el('rssiMax').value  = rssi_max;
+        if (el('macRand'))  el('macRand').checked  = !!mac_rand;
+        if (el('burstOn'))  el('burstOn').value  = burst_on;
+        if (el('burstOff')) el('burstOff').value = burst_off;
+        if (el('uburstOn')) el('uburstOn').value = uburst_on;
+        if (el('uburstOff'))el('uburstOff').value= uburst_off;
+        if (el('spreadCh')) el('spreadCh').checked = !!spread_ch;
+        if (el('stressLoop')) {
+            el('stressLoop').value = loop_ms;
+            const lbl = document.getElementById('loopLabel');
+            if (lbl) lbl.innerText = loop_ms + ' ms';
+        }
     }
 
     if (btn) btn.disabled = false;

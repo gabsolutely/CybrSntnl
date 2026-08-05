@@ -41,16 +41,69 @@
 // =============================================================================
 // 3. DETECTION TUNING
 // =============================================================================
+// ⚠️  CRITICAL NOTE ON TUNING ⚠️
+//   These values are lab-defaults for a quiet residential environment. They
+//   WILL FALSE-POSITIVE in busy venues (conferences, LAN parties, coffee
+//   shops, university dorms). There is no one-size-fits-all:
+//     • DEAUTH_THRESHOLD   → 2 pkt/s is aggressive for a lab, 20 pkt/s is
+//                            typical for a conference.
+//     • ASSOC_THRESHOLD    → 100 pkt/s is safe for residential, 800+ in
+//                            event Wi-Fi with 50+ clients.
+//     • RSSI_VARIANCE_THRESHOLD → 15 is tight, use 25+ in RF-dense areas.
+//     • HIGH_THREAT_THRESHOLD → 7.0 triggers Threat Lock. Bump to 8.0/8.5
+//                               if a crowded room is enough to spike it.
+//   For portfolio demos use Stress Test's "MICROBURST DEAUTH" profile at
+//   120 pkt/s — it's the most realistic replica of a handshake-grabber.
+// =============================================================================
 #define WINDOW_SIZE                100   // Feature-extraction sliding window
 #define LOG_ROTATE_DAYS            7     // SPIFFS log rotation cycle
 
-// Detection thresholds — tune per environment
+// Detection thresholds — TUNE PER ENVIRONMENT (see warning above)
 static constexpr float DEAUTH_THRESHOLD        = 2.0f;   // pkt/s → disassoc flood
 static constexpr float ASSOC_THRESHOLD         = 100.0f; // pkt/s → assoc/spoof flood
 static constexpr float RSSI_VARIANCE_THRESHOLD = 15.0f;  // variance → jam/instability
 
 #define FEATURE_MIN_PACKETS        5     // Min packets needed to score a window
 #define HIGH_THREAT_THRESHOLD      7.0f  // Threat score → auto Threat Lock + alert
+
+// =============================================================================
+// 3B. STRESS TEST / SYNTHETIC INJECTOR CONFIG
+// =============================================================================
+// These are *compile-time defaults*. At runtime the dashboard can override
+// every value via the /stresstest endpoint query params. Zero values fall
+// back to the defaults below.
+//
+//   Stress attack profiles (attack_profile):
+//     0 = CONSTANT_STREAM      — flat line, easiest to reproduce
+//     1 = BURSTY_SQUARE        — 3s on / 1s off square wave
+//     2 = MICROBURST_DEAUTH    — the realistic attacker. ~1.2s inject, ~4s
+//                                silence loop. Exactly what a handshake grabber does.
+//     3 = MIXED_FRAME_TYPES    — deauth + assoc + probe-request mix for
+//                                testing the RSSI/entropy features.
+//
+//   Frame-type flags (frame_type_mask, bitmask; combine via OR):
+//     bit 0 (1)  → Deauth (subtype 0x0C)
+//     bit 1 (2)  → Disassoc (subtype 0x0A)
+//     bit 2 (4)  → Assoc Request (subtype 0x00)
+//     bit 3 (8)  → Probe Request (subtype 0x04)
+//
+//   Recommended demo presets (copy-paste into URL or dashboard):
+//     • "easy handshake grabber"   → rate=120, profile=2 (MICROBURST), mask=1
+//     • "noisy coffee shop"        → rate=450, profile=0, mask=15, rssi_min=-75, rssi_max=-35, entropy=1
+//     • "classroom safe baseline"  → rate=30,  profile=0, mask=1
+
+#define STRESS_DEFAULT_RATE_PKTS_PER_SEC   50     // Target packets/sec
+#define STRESS_DEFAULT_ATTACK_PROFILE      0      // 0..3 (see above)
+#define STRESS_DEFAULT_FRAME_TYPE_MASK     1      // default = deauth only (bit 0)
+#define STRESS_DEFAULT_RSSI_MIN            -85    // dBm
+#define STRESS_DEFAULT_RSSI_MAX            -40    // dBm
+#define STRESS_DEFAULT_MAC_RANDOMIZE       0      // 1 = randomize hashes (tests entropy)
+#define STRESS_DEFAULT_BURST_ON_MS         3000   // BURSTY_SQUARE profile → on-time
+#define STRESS_DEFAULT_BURST_OFF_MS        1000   // BURSTY_SQUARE profile → off-time
+#define STRESS_DEFAULT_MICROBURST_ON_MS    1200   // MICROBURST_DEAUTH → on-time
+#define STRESS_DEFAULT_MICROBURST_OFF_MS   4000   // MICROBURST_DEAUTH → off-time
+#define STRESS_DEFAULT_SPREAD_CHANNELS     0      // 1 = vary channel across home±2
+#define STRESS_DEFAULT_LOOP_ITERATION_MS   1000   // outer loop cadence
 
 // =============================================================================
 // 4. HARDWARE

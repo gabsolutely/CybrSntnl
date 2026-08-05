@@ -36,6 +36,21 @@ extern unsigned long lastThreatSeenTime;
 extern volatile bool stressTestActive;
 extern volatile unsigned long stressTestInjectedPackets;
 
+// Runtime-tunable Stress Test config. Dashboard can override every field via
+// the /stresstest query params. Zero values fall back to config.h defaults.
+extern volatile uint32_t stressCfgRatePktPerSec;    // target injection rate
+extern volatile uint8_t  stressCfgAttackProfile;    // 0..3 (see config.h)
+extern volatile uint8_t  stressCfgFrameTypeMask;    // bitmask: bit0=deauth 1=disassoc 2=assoc 3=probe
+extern volatile int8_t   stressCfgRssiMin;          // dBm
+extern volatile int8_t   stressCfgRssiMax;          // dBm
+extern volatile uint8_t  stressCfgMacRandomize;     // 1 = randomize per pkt (tests entropy)
+extern volatile uint32_t stressCfgBurstOnMs;        // BURSTY profile on-time
+extern volatile uint32_t stressCfgBurstOffMs;       // BURSTY profile off-time
+extern volatile uint32_t stressCfgMicroburstOnMs;   // MICROBURST profile on-time
+extern volatile uint32_t stressCfgMicroburstOffMs;  // MICROBURST profile off-time
+extern volatile uint8_t  stressCfgSpreadChannels;   // 1 = vary channel ±2
+extern volatile uint32_t stressCfgLoopIterationMs;  // outer loop cadence
+
 // Single mutex for all shared state. Timeout-gated everywhere to avoid deadlock.
 extern SemaphoreHandle_t globalStateMutex;
 
