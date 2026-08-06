@@ -1,4 +1,4 @@
-# CyberSentinel Core
+# ESP-CyberSentinel
 
 Open-source 802.11 management-frame anomaly sensor that runs entirely on a $5 ESP32.
 
@@ -209,5 +209,4 @@ All runtime config is also exported in `/data` as `stress_cfg_*` fields for CSV/
 | v3.0 | XX months | ESP32-C5 5GHz target, multi-radio reference design, on-device tinyML classifier |
 
 ## License
-
 MIT. Free to use, modify, distribute, and use commercially. Attribution appreciated but not required beyond the license text — see [LICENSE](LICENSE).
