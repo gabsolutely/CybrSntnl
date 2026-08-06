@@ -17,7 +17,7 @@
 // CS_MODE_CORE     / CS_MODE_INTERNAL are set via platformio.ini build flags.
 // Do NOT uncomment them here — the build system handles them per env.
 
-#define FW_VERSION                 "1.3.0"
+#define FW_VERSION                 "1.4.0"
 #define DEVELOPMENT_MODE 0    // 0 = release (clean logs, no debug spam)
 
 #if defined(CS_MODE_INTERNAL)
@@ -123,7 +123,7 @@ static constexpr float RSSI_VARIANCE_THRESHOLD = 15.0f;  // variance → jam/ins
 
 // Standalone access point (dashboard UI lives here)
 #define WIFI_CHECK_INTERVAL_MS     30000
-#define AP_SSID                    "CyberSentinel-Fallback"
+#define AP_SSID                    "CyberSentinel-AP"
 #define AP_PASS                    "fallback123456"
 #define FALLBACK_AP_IP             IPAddress(192, 168, 4, 1)
 

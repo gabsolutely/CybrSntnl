@@ -325,6 +325,11 @@ void taskFeatureExtraction(void *pvParameters) {
                 }
                 xSemaphoreGive(globalStateMutex);
             }
+
+            // Recommendation generators — run outside the critical section so
+            // they don't starve the radio controller of the mutex.
+            recCheckBaselineDrift();
+            recCheckStressPostCalibration();
         }
     }
 }

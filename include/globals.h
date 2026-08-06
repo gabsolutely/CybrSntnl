@@ -14,6 +14,30 @@ enum ChannelMode {
 };
 
 // =============================================================================
+// RECOMMENDATION ENGINE — LRU RING BUFFER (4 entries)
+// =============================================================================
+enum RecSeverity {
+    REC_INFO,
+    REC_SUGGEST,
+    REC_WARN
+};
+
+enum RecParameter {
+    REC_PARAM_DEAUTH,
+    REC_PARAM_ASSOC,
+    REC_PARAM_RSSI_VAR
+};
+
+struct RecEntry {
+    unsigned long timestamp;
+    RecSeverity   severity;
+    RecParameter  parameter;
+    float         from_value;
+    float         to_value;
+    char          reason[96];
+};
+
+// =============================================================================
 // INTER-CORE STATE (externs — memory lives in globals.cpp)
 // =============================================================================
 // Core 0 (radio controller) and Core 1 (everything else) share these through
@@ -35,6 +59,7 @@ extern unsigned long lastThreatSeenTime;
 
 extern volatile bool stressTestActive;
 extern volatile unsigned long stressTestInjectedPackets;
+extern volatile unsigned long stressTestStartTime;
 
 // Runtime-tunable Stress Test config. Dashboard can override every field via
 // the /stresstest query params. Zero values fall back to config.h defaults.
@@ -51,6 +76,25 @@ extern volatile uint32_t stressCfgMicroburstOffMs;  // MICROBURST profile off-ti
 extern volatile uint8_t  stressCfgSpreadChannels;   // 1 = vary channel ±2
 extern volatile uint32_t stressCfgLoopIterationMs;  // outer loop cadence
 
+// Runtime-tunable Detection Thresholds (config.h as compile-time defaults,
+// persisted to NVS, settable via /config endpoint).
+extern volatile float detectCfgDeauthThreshold;
+extern volatile float detectCfgAssocThreshold;
+extern volatile float detectCfgRssiVarThreshold;
+
+// Recommendation Ring Buffer (4-entry LRU)
+#define REC_RING_SIZE 4
+extern RecEntry recRing[REC_RING_SIZE];
+extern volatile uint8_t recRingHead;
+extern volatile uint8_t recRingCount;
+
+// Baseline drift detector state
+extern float baselineAvgDeauth;
+extern float baselineAvgAssoc;
+extern float baselineAvgRssiVar;
+extern unsigned long baselineFalseWarningCount[3]; // per-param false warning count
+extern unsigned long baselineSampleCount;
+
 // Single mutex for all shared state. Timeout-gated everywhere to avoid deadlock.
 extern SemaphoreHandle_t globalStateMutex;
 
@@ -61,5 +105,25 @@ void   initializeGlobals();
 void   resetSystemState();
 String getSystemStatusJson();
 bool   checkSystemHealth();
+
+// NVS persistence for detection thresholds
+bool   nvsLoadThresholds();
+bool   nvsSaveThresholds();
+void   nvsResetThresholdsToDefaults();
+
+// Recommendation ring buffer helpers
+void   recPush(const RecEntry& entry);
+RecEntry recGet(uint8_t index); // 0 = newest, recRingCount-1 = oldest
+String recSeverityStr(RecSeverity s);
+String recParamStr(RecParameter p);
+
+// Recommendation source generators
+void   recCheckBaselineDrift();
+void   recCheckStressPostCalibration();
+
+// Effective-value helpers (falls back to config.h defaults if globals are 0 sentinel)
+float  effDeauthThreshold();
+float  effAssocThreshold();
+float  effRssiVarThreshold();
 
 #endif // GLOBALS_H

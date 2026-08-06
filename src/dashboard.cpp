@@ -154,6 +154,7 @@ void Dashboard::init() {
   server->on("/health", Dashboard::handleHealth);
   server->on("/system", Dashboard::handleSystem);
   server->on("/stresstest", Dashboard::handleStressTest);
+  server->on("/config", Dashboard::handleConfig);
 
   // Static file handlers
   server->on("/dashboard.css", Dashboard::handleCSS);
@@ -262,6 +263,46 @@ void Dashboard::handleData() {
 
     doc["uptime"] = millis() / 1000;
     doc["fw_version"] = FW_VERSION;
+    doc["build_mode"] = INTERNAL_BUILD ? "INTERNAL" : "CORE";
+    doc["is_internal_build"] = INTERNAL_BUILD;
+
+    // =========================================================================
+    // DETECTION THRESHOLDS — runtime globals (raw + effective)
+    // =========================================================================
+    {
+        extern volatile float detectCfgDeauthThreshold;
+        extern volatile float detectCfgAssocThreshold;
+        extern volatile float detectCfgRssiVarThreshold;
+        // Raw stored values (0 = sentinel means "use config.h default")
+        doc["detect_cfg_deauth"]     = (float)detectCfgDeauthThreshold;
+        doc["detect_cfg_assoc"]      = (float)detectCfgAssocThreshold;
+        doc["detect_cfg_rssi_var"]   = (float)detectCfgRssiVarThreshold;
+        // Effective values — what threat_analyzer actually compares against
+        doc["detect_eff_deauth"]     = effDeauthThreshold();
+        doc["detect_eff_assoc"]      = effAssocThreshold();
+        doc["detect_eff_rssi_var"]   = effRssiVarThreshold();
+    }
+
+    // =========================================================================
+    // RECOMMENDATION ENGINE — 4-entry LRU ring (newest first)
+    // =========================================================================
+    {
+        JsonArray recs = doc["recommendations"].to<JsonArray>();
+        for (uint8_t i = 0; i < recRingCount && i < REC_RING_SIZE; i++) {
+            RecEntry e = recGet(i);
+            if (e.timestamp == 0 && i > 0) break; // empty slot beyond head
+            JsonObject o = recs.add<JsonObject>();
+            o["idx"]       = i;
+            o["timestamp"] = e.timestamp;
+            o["age_ms"]    = (uint32_t)(millis() - e.timestamp);
+            o["severity"]  = recSeverityStr(e.severity);
+            o["parameter"] = recParamStr(e.parameter);
+            o["from"]      = e.from_value;
+            o["to"]        = e.to_value;
+            o["reason"]    = String(e.reason);
+        }
+    }
+
     // Stress test / synthetic demo injector telemetry + capability flag + runtime config
     {
         extern volatile bool stressTestActive;
@@ -387,7 +428,7 @@ void Dashboard::handleHealth() {
     doc["status"] = "ok";
     doc["uptime"] = millis() / 1000;
     doc["free_heap"] = ESP.getFreeHeap();
-    doc["build_mode"] = "CORE";
+    doc["build_mode"] = INTERNAL_BUILD ? "INTERNAL" : "CORE";
     doc["fw_version"] = FW_VERSION;
     {
         extern volatile bool stressTestActive;
@@ -519,6 +560,8 @@ void Dashboard::handleStressTest() {
         bool want = (st == "1" || st == "on" || st == "true");
         stressTestActive = want;
         if (want) {
+            // Timestamp for stress-post-calibration recommendation (>=30s runs)
+            stressTestStartTime = millis();
             Serial.println("[StressTest] DASHBOARD TRIGGERED — synthetic injector ON");
         } else {
             Serial.println("[StressTest] Dashboard cleared — synthetic injector OFF");
@@ -629,6 +672,101 @@ void Dashboard::handleStressTest() {
     } else {
         doc["result"]  = "status";
         doc["message"] = "Read-only. Pass ?state=on, ?rate=N, ?profile=N, ?mask=N, etc. All params optional; auth required for writes.";
+    }
+
+    String out; serializeJson(doc, out);
+    srv->send(200, "application/json", out);
+}
+
+// =============================================================================
+// DETECTION CONFIG ENDPOINT — runtime tunable thresholds
+// =============================================================================
+// GET /config                         → read-only JSON (no auth required)
+// GET /config?deauth=2.0&assoc=100    → write (auth required), clamped, saved to NVS
+// GET /config?reset=1                 → reset all 3 thresholds to config.h defaults (auth)
+//
+// Clamping ranges:
+//   deauth   → 0.1 pkt/s .. 100 pkt/s
+//   assoc    → 5 pkt/s   .. 5000 pkt/s
+//   rssi_var → 1 .. 100
+void Dashboard::handleConfig() {
+    if (!globalInstance || !globalInstance->server) return;
+    WebServer* srv = globalInstance->server;
+
+    extern volatile float detectCfgDeauthThreshold;
+    extern volatile float detectCfgAssocThreshold;
+    extern volatile float detectCfgRssiVarThreshold;
+
+    JsonDocument doc;
+
+    const bool wantsDeauth   = srv->hasArg("deauth");
+    const bool wantsAssoc    = srv->hasArg("assoc");
+    const bool wantsRssiVar  = srv->hasArg("rssi_var");
+    const bool wantsReset    = srv->hasArg("reset");
+    const bool wantsWrite = wantsDeauth || wantsAssoc || wantsRssiVar || wantsReset;
+
+    if (!authorizeRequest(true)) return;
+
+    if (wantsWrite && !INTERNAL_BUILD) {
+        doc["result"] = "error";
+        doc["message"] = "Detection thresholds are read-only in CORE builds.";
+        String out; serializeJson(doc, out);
+        srv->send(403, "application/json", out);
+        return;
+    }
+
+    String changedList = "";
+
+    if (wantsReset) {
+        nvsResetThresholdsToDefaults();
+        changedList = "reset=defaults ";
+        Serial.println("[Config] All thresholds reset to config.h defaults");
+    }
+
+    if (wantsDeauth) {
+        float v = srv->arg("deauth").toFloat();
+        if (v < 0.1f)  v = 0.1f;
+        if (v > 100.0f) v = 100.0f;
+        detectCfgDeauthThreshold = v;
+        changedList += "deauth=" + String(v, 2) + " ";
+    }
+    if (wantsAssoc) {
+        float v = srv->arg("assoc").toFloat();
+        if (v < 5.0f)    v = 5.0f;
+        if (v > 5000.0f) v = 5000.0f;
+        detectCfgAssocThreshold = v;
+        changedList += "assoc=" + String(v, 2) + " ";
+    }
+    if (wantsRssiVar) {
+        float v = srv->arg("rssi_var").toFloat();
+        if (v < 1.0f)   v = 1.0f;
+        if (v > 100.0f) v = 100.0f;
+        detectCfgRssiVarThreshold = v;
+        changedList += "rssi_var=" + String(v, 2) + " ";
+    }
+
+    if (wantsWrite) {
+        nvsSaveThresholds();
+    }
+
+    // Always respond with current effective state
+    doc["cfg_deauth"]   = (float)detectCfgDeauthThreshold;
+    doc["cfg_assoc"]    = (float)detectCfgAssocThreshold;
+    doc["cfg_rssi_var"] = (float)detectCfgRssiVarThreshold;
+    doc["eff_deauth"]   = effDeauthThreshold();
+    doc["eff_assoc"]    = effAssocThreshold();
+    doc["eff_rssi_var"] = effRssiVarThreshold();
+    doc["defaults"] = JsonObject();
+    doc["defaults"]["deauth"]   = DEAUTH_THRESHOLD;
+    doc["defaults"]["assoc"]    = ASSOC_THRESHOLD;
+    doc["defaults"]["rssi_var"] = RSSI_VARIANCE_THRESHOLD;
+
+    if (wantsWrite) {
+        doc["result"]  = "ok";
+        doc["message"] = "Detection thresholds applied: " + changedList + "(persisted to NVS)";
+    } else {
+        doc["result"]  = "status";
+        doc["message"] = "Read-only. Pass ?deauth=N &assoc=N &rssi_var=N to change. Auth required for writes. ?reset=1 reverts to config.h defaults.";
     }
 
     String out; serializeJson(doc, out);

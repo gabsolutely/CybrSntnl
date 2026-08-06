@@ -1,4 +1,5 @@
 #include "threat_analyzer.h"
+#include "globals.h"
 #include <Arduino.h>
 #include <algorithm> // For std::min and std::max
 #include "config.h"  // Pulls in all threat configuration
@@ -13,12 +14,18 @@ ThreatReport ThreatAnalyzer::analyzeEnvironment(const FeatureVec& features) {
     float dynamic_score = 1.0f;
     const char* detected_type = "Normal";
 
+    // Runtime effective thresholds — falls back to config.h defaults if NVS
+    // hasn't been written yet (0-sentinel). User-overridable via /config API.
+    const float T_DEAUTH  = effDeauthThreshold();
+    const float T_ASSOC   = effAssocThreshold();
+    const float T_RSSIVAR = effRssiVarThreshold();
+
     // =========================================================================
-    // EVALUATION ENGINE (Core Heuristics using config.h thresholds)
+    // EVALUATION ENGINE (Core Heuristics using RUNTIME thresholds)
     // =========================================================================
     
     // 1. Deauthentication Attack Detection
-    if (features.disassoc_rate > DEAUTH_THRESHOLD) { 
+    if (features.disassoc_rate > T_DEAUTH) { 
         float deauth_penalty = std::min(5.0f, features.disassoc_rate * 1.5f);
         dynamic_score += deauth_penalty;
         
@@ -28,8 +35,8 @@ ThreatReport ThreatAnalyzer::analyzeEnvironment(const FeatureVec& features) {
     }
 
     // 2. Association Flood / MAC Spoofing Detection
-    if (features.assoc_rate > ASSOC_THRESHOLD) {
-        float velocity_penalty = std::min(6.0f, (features.assoc_rate - ASSOC_THRESHOLD) * 0.02f);
+    if (features.assoc_rate > T_ASSOC) {
+        float velocity_penalty = std::min(6.0f, (features.assoc_rate - T_ASSOC) * 0.02f);
         float spoofing_penalty = std::min(3.0f, features.mac_entropy * 0.5f);
         
         dynamic_score += (velocity_penalty + spoofing_penalty);
@@ -43,8 +50,8 @@ ThreatReport ThreatAnalyzer::analyzeEnvironment(const FeatureVec& features) {
     } 
     
     // 3. Signal Jamming / Interference Detection
-    if (features.rssi_variance > RSSI_VARIANCE_THRESHOLD) {
-        float jamming_penalty = std::min(3.0f, (features.rssi_variance - RSSI_VARIANCE_THRESHOLD) * 0.15f);
+    if (features.rssi_variance > T_RSSIVAR) {
+        float jamming_penalty = std::min(3.0f, (features.rssi_variance - T_RSSIVAR) * 0.15f);
         dynamic_score += jamming_penalty;
         
         if (jamming_penalty > 1.5f && dynamic_score < 7.0f && strcmp(detected_type, "Normal") == 0) {

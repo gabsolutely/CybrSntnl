@@ -250,7 +250,9 @@ function validateApiResponse(data) {
     current_channel: safeNum(data.current_channel) || 1,
     channel_mode:    typeof data.channel_mode === 'string' ? data.channel_mode.substring(0, 20) : 'UNKNOWN',
 
-    // --- Stress Test / Synthetic Injector ---
+    // --- Build mode / capability ---
+    build_mode:      typeof data.build_mode === 'string' ? data.build_mode : (data.is_internal_build ? 'INTERNAL' : 'CORE'),
+    is_internal_build: !!(data.is_internal_build || data.build_mode === 'INTERNAL' || data.stress_capable),
     stress_capable:  !!data.stress_capable,
     stress_active:   !!data.stress_active,
     stress_injected: safeNum(data.stress_injected),
@@ -265,7 +267,18 @@ function validateApiResponse(data) {
     stress_cfg_uburst_on:  safeNum(data.stress_cfg_uburst_on),
     stress_cfg_uburst_off: safeNum(data.stress_cfg_uburst_off),
     stress_cfg_spread_ch:  safeNum(data.stress_cfg_spread_ch),
-    stress_cfg_loop_ms:    safeNum(data.stress_cfg_loop_ms)
+    stress_cfg_loop_ms:    safeNum(data.stress_cfg_loop_ms),
+
+    // --- Detection Thresholds (runtime tunable, NVS persisted) ---
+    detect_cfg_deauth:   safeNum(data.detect_cfg_deauth),
+    detect_cfg_assoc:    safeNum(data.detect_cfg_assoc),
+    detect_cfg_rssi_var: safeNum(data.detect_cfg_rssi_var),
+    detect_eff_deauth:   safeNum(data.detect_eff_deauth)   || DETECT_DEFAULTS.deauth,
+    detect_eff_assoc:    safeNum(data.detect_eff_assoc)    || DETECT_DEFAULTS.assoc,
+    detect_eff_rssi_var: safeNum(data.detect_eff_rssi_var) || DETECT_DEFAULTS.rssi_var,
+
+    // --- Recommendation engine (LRU ring, newest first) ---
+    recommendations: Array.isArray(data.recommendations) ? data.recommendations : []
   };
 
   return validated;
@@ -284,6 +297,12 @@ const STRESS_DEFAULTS = {
   uburst_off: 4000,
   spread_ch:  0,
   loop_ms:    1000
+};
+
+const DETECT_DEFAULTS = {
+  deauth:   2.0,
+  assoc:    100.0,
+  rssi_var: 15.0
 };
 
 function eff(v, sentinel, def) {
@@ -533,6 +552,10 @@ async function fetchData() {
 
         // --- Stress Test UI updates -----
         updateStressTestUI(validatedData);
+
+        // --- Detection Thresholds & Recommendations UI -----
+        updateDetectionUI(validatedData);
+        updateRecommendationsUI(validatedData);
 
         updateHealthScore(validatedData);
         updateThreatHistory(validatedData);
@@ -1084,5 +1107,273 @@ async function toggleStressTest() {
     } catch (e) {
         console.error("Stress-test toggle error:", e);
         addLog("⚠️ Stress test toggle failed — network error");
+    }
+}
+
+// ============================================================================
+// DETECTION THRESHOLDS UI — runtime tuning + NVS persistence
+// ============================================================================
+let lastDetectCfgSig = '';
+
+function updateDetectionUI(d) {
+    const el = (id) => document.getElementById(id);
+    const isInternal = !!(d.is_internal_build || d.stress_capable);
+
+    // Hydrate effective-value labels (always current regardless of form focus)
+    if (el('deauthEffLabel'))  el('deauthEffLabel').innerText  = d.detect_eff_deauth.toFixed(1);
+    if (el('assocEffLabel'))   el('assocEffLabel').innerText   = d.detect_eff_assoc.toFixed(1);
+    if (el('rssiVarEffLabel')) el('rssiVarEffLabel').innerText = d.detect_eff_rssi_var.toFixed(1);
+
+    const deauthInput  = el('detectDeauth');
+    const assocInput   = el('detectAssoc');
+    const rssiVarInput = el('detectRssiVar');
+    const applyBtn     = el('detectApplyBtn');
+    const resetBtn     = el('detectResetBtn');
+    const modeHint     = el('detectModeHint');
+    const badge        = el('detectCfgBadge');
+
+    [deauthInput, assocInput, rssiVarInput].forEach(input => {
+        if (input) {
+            input.disabled = !isInternal;
+            input.style.opacity = isInternal ? '1' : '0.7';
+        }
+    });
+    [applyBtn, resetBtn].forEach(btn => {
+        if (btn) btn.disabled = !isInternal;
+    });
+
+    if (modeHint) {
+        modeHint.innerText = isInternal
+            ? 'Internal builds can edit and persist thresholds to NVS.'
+            : 'Core build: thresholds are shown for reference only. Editable controls are disabled until the firmware is rebuilt as internal.';
+    }
+    if (badge) {
+        badge.className = 'stresstest-badge ' + (isInternal ? 'stresstest-idle' : 'stresstest-unsupported');
+        badge.innerText = isInternal ? 'IDLE' : 'CORE';
+    }
+
+    // Signature-based hydration — don't fight the user if they're actively typing
+    const sig = [d.detect_cfg_deauth, d.detect_cfg_assoc, d.detect_cfg_rssi_var].join('|');
+    if (sig === lastDetectCfgSig) return;
+
+    const focusId = document.activeElement ? document.activeElement.id : null;
+
+    if (deauthInput  && focusId !== 'detectDeauth')  deauthInput.value  = d.detect_cfg_deauth  || '';
+    if (assocInput   && focusId !== 'detectAssoc')   assocInput.value   = d.detect_cfg_assoc   || '';
+    if (rssiVarInput && focusId !== 'detectRssiVar') rssiVarInput.value = d.detect_cfg_rssi_var || '';
+
+    lastDetectCfgSig = sig;
+}
+
+function setDetectBadge(state, msg) {
+    const badge = document.getElementById('detectCfgBadge');
+    const msgEl = document.getElementById('detectCfgMsg');
+    if (badge) {
+        badge.className = 'stresstest-badge stresstest-' +
+            (state === 'ok' ? 'idle' : state === 'busy' ? 'active' : 'unsupported');
+        badge.innerText = state === 'ok' ? 'SAVED' : state === 'busy' ? 'SAVING…' : state === 'err' ? 'ERROR' : 'IDLE';
+    }
+    if (msgEl) msgEl.innerText = msg || '';
+}
+
+async function submitDetectConfig() {
+    const el = (id) => document.getElementById(id);
+    const applyBtn = el('detectApplyBtn');
+    if (applyBtn?.disabled) {
+        setDetectBadge('unsupported', 'Detection thresholds are read-only in this build.');
+        addLog('⚠️ Detection thresholds are read-only in this build.');
+        return;
+    }
+
+    const deauthRaw  = parseFloat(el('detectDeauth')?.value);
+    const assocRaw   = parseFloat(el('detectAssoc')?.value);
+    const rssiVarRaw = parseFloat(el('detectRssiVar')?.value);
+
+    // Treat NaN, null, negative as "0 = reset to default for that param"
+    const deauth  = isFinite(deauthRaw)  ? deauthRaw  : 0;
+    const assoc   = isFinite(assocRaw)   ? assocRaw   : 0;
+    const rssiVar = isFinite(rssiVarRaw) ? rssiVarRaw : 0;
+
+    setDetectBadge('busy', 'Writing thresholds + persisting to NVS...');
+
+    try {
+        const qs = new URLSearchParams();
+        qs.set('deauth',   deauth.toFixed(2));
+        qs.set('assoc',    assoc.toFixed(1));
+        qs.set('rssi_var', rssiVar.toFixed(1));
+
+        const res = await fetch(`/config?${qs.toString()}`, { method: 'GET', cache: 'no-store' });
+        const text = await res.text();
+        let d = null;
+        try { d = JSON.parse(text); } catch (_) {}
+
+        if (!res.ok) {
+            const msg = (d && d.message) ? d.message : `HTTP ${res.status}`;
+            setDetectBadge('err', msg);
+            addLog('⚠️ Detection config error: ' + msg);
+            return;
+        }
+
+        setDetectBadge('ok', (d && d.message) ? d.message : 'Applied.');
+        lastDetectCfgSig = ''; // force re-hydrate
+        fetchData();
+        addLog('✅ Detection thresholds saved to NVS flash.');
+
+    } catch (e) {
+        console.error('Detect config submit error:', e);
+        setDetectBadge('err', 'Network error — check connection');
+    }
+}
+
+async function resetDetectDefaults() {
+    const applyBtn = document.getElementById('detectApplyBtn');
+    if (applyBtn?.disabled) {
+        setDetectBadge('unsupported', 'Detection thresholds are read-only in this build.');
+        addLog('⚠️ Detection thresholds are read-only in this build.');
+        return;
+    }
+
+    if (!confirm('Revert all 3 detection thresholds to config.h compile-time defaults and wipe NVS overrides?')) {
+        return;
+    }
+    setDetectBadge('busy', 'Resetting to config.h defaults...');
+    try {
+        const res = await fetch('/config?reset=1', { method: 'GET', cache: 'no-store' });
+        const text = await res.text();
+        let d = null;
+        try { d = JSON.parse(text); } catch (_) {}
+        if (!res.ok) {
+            const msg = (d && d.message) ? d.message : `HTTP ${res.status}`;
+            setDetectBadge('err', msg);
+            return;
+        }
+        setDetectBadge('ok', (d && d.message) ? d.message : 'Defaults restored.');
+        lastDetectCfgSig = '';
+        fetchData();
+        addLog('↺ Detection thresholds reset to config.h defaults.');
+    } catch (e) {
+        console.error('Detect reset error:', e);
+        setDetectBadge('err', 'Network error');
+    }
+}
+
+// ============================================================================
+// RECOMMENDATIONS UI — LRU 4-entry ring + click-to-apply
+// ============================================================================
+let lastRecsSig = '';
+
+function recSeverityClass(s) {
+    switch (String(s).toUpperCase()) {
+        case 'WARN':    return 'rec-warn';
+        case 'SUGGEST': return 'rec-suggest';
+        case 'INFO':    return 'rec-info';
+        default:        return 'rec-info';
+    }
+}
+
+function recSeverityBadge(s) {
+    switch (String(s).toUpperCase()) {
+        case 'WARN':    return { txt: '⚠️ WARN',    cls: 'rec-sev rec-sev-warn' };
+        case 'SUGGEST': return { txt: '💡 SUGGEST', cls: 'rec-sev rec-sev-suggest' };
+        case 'INFO':    return { txt: 'ℹ️ INFO',    cls: 'rec-sev rec-sev-info' };
+        default:        return { txt: 'ℹ️ INFO',    cls: 'rec-sev rec-sev-info' };
+    }
+}
+
+function formatAgeMs(ms) {
+    if (!isFinite(ms) || ms < 0) return 'just now';
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's ago';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    return h + 'h ago';
+}
+
+function updateRecommendationsUI(d) {
+    const emptyHint = document.getElementById('recsEmptyHint');
+    const listEl    = document.getElementById('recsList');
+    if (!listEl) return;
+
+    const isInternal = !!(d.is_internal_build || d.stress_capable);
+    const recs = d.recommendations || [];
+    const sig = recs.map(r => [r.idx, r.timestamp, r.to].join('|')).join('||');
+    if (sig === lastRecsSig) return;
+    lastRecsSig = sig;
+
+    if (!recs.length) {
+        if (emptyHint) emptyHint.style.display = '';
+        listEl.innerHTML = '';
+        return;
+    }
+    if (emptyHint) emptyHint.style.display = 'none';
+
+    const html = [];
+    for (let i = 0; i < recs.length; i++) {
+        const r = recs[i];
+        const sev = recSeverityBadge(r.severity);
+        const param = String(r.parameter || '').replace(/_/g, ' ');
+        const age = formatAgeMs(r.age_ms);
+        html.push(`
+            <div class="rec-card ${recSeverityClass(r.severity)}">
+                <div class="rec-head">
+                    <span class="${sev.cls}">${sev.txt}</span>
+                    <span class="rec-age">${age}</span>
+                </div>
+                <div class="rec-param">${param}</div>
+                <div class="rec-reason">${String(r.reason || '').replace(/[<>]/g, '')}</div>
+                <div class="rec-foot">
+                    <div class="rec-values">
+                        <span class="rec-val-from">${Number(r.from).toFixed(1)}</span>
+                        <span class="rec-arrow">→</span>
+                        <span class="rec-val-to">${Number(r.to).toFixed(1)}</span>
+                    </div>
+                    <button class="btn btn-rec-apply" onclick="applyRecommendation(${i})" ${isInternal ? '' : 'disabled'}>✓ Apply suggestion</button>
+                </div>
+            </div>`);
+    }
+    listEl.innerHTML = html.join('');
+}
+
+// Pull the recommendation from live `validatedData` via window shadow and POST it to /config
+async function applyRecommendation(idx) {
+    try {
+        const res = await fetch('/data', { cache: 'no-store' });
+        if (!res.ok) throw new Error('data fetch failed');
+        const raw = await res.json();
+        const v = validateApiResponse(raw);
+        const rec = (v.recommendations || [])[idx];
+        if (!rec) { addLog('⚠️ Recommendation no longer in ring buffer.'); return; }
+
+        const paramKey = String(rec.parameter || '').toUpperCase();
+        let qKey = null;
+        if (paramKey.includes('DEAUTH'))  qKey = 'deauth';
+        else if (paramKey.includes('ASSOC')) qKey = 'assoc';
+        else if (paramKey.includes('RSSI') || paramKey.includes('VAR')) qKey = 'rssi_var';
+
+        if (!qKey) { addLog('⚠️ Unknown recommendation parameter: ' + paramKey); return; }
+
+        const to = Number(rec.to).toFixed(2);
+        setDetectBadge('busy', `Applying recommendation: ${qKey}=${to}…`);
+        addLog(`💡 Applying recommendation — setting ${qKey}=${to}…`);
+
+        const qs = new URLSearchParams();
+        qs.set(qKey, to);
+        const cfg = await fetch(`/config?${qs.toString()}`, { method: 'GET', cache: 'no-store' });
+        const txt = await cfg.text();
+        let d = null; try { d = JSON.parse(txt); } catch(_) {}
+        if (!cfg.ok) {
+            const msg = (d && d.message) ? d.message : `HTTP ${cfg.status}`;
+            setDetectBadge('err', msg);
+            addLog('⚠️ Apply recommendation failed: ' + msg);
+            return;
+        }
+        setDetectBadge('ok', (d && d.message) ? d.message : 'Applied.');
+        lastDetectCfgSig = '';
+        fetchData();
+        addLog('✅ Recommendation applied & saved to NVS.');
+    } catch (e) {
+        console.error('Apply rec error:', e);
+        setDetectBadge('err', 'Network error');
     }
 }

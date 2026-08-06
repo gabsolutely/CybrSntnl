@@ -114,14 +114,14 @@
     </section>
 
     <section class="controls">
-      <h3>Frequency & Observation Controls</h3>          
+      <h3>Frequency & Observation Controls</h3>
       <h4>Current Channel: <span id="channelDisplay" style="color: #3498db;">Auto-Hopping (Ch 1)</span></h4>
-      
+
       <div class="control-row" style="margin-bottom: 18px;">
         <label for="channelSelect" style="margin-right: 8px; font-size: 13px; color: var(--muted);">Radio Allocation:</label>
         <select id="channelSelect" class="btn" onchange="handleChannelChange(this.value)">
           <option value="auto">Auto-Hopping (Spectrum Scan)</option>
-          <hr>  
+          <hr>
           <option value="1">Ch 1 (2.412 GHz) — Non-Overlapping</option>
           <option value="2">Ch 2 (2.417 GHz)</option>
           <option value="3">Ch 3 (2.422 GHz)</option>
@@ -146,153 +146,170 @@
       </div>
     </section>
 
-    <section class="stresstest-panel" id="stressTestPanel">
-      <h3>Stress Test &mdash; Synthetic Injector</h3>
-
-      <!-- CORE-build placeholder (shown when stress_capable=false; JS hides the grid below) -->
-      <div id="stressDisabledBanner" class="stress-disabled-banner" style="display:none;">
-        <div class="stress-disabled-icon">⚡</div>
-        <div class="stress-disabled-text">
-          <strong>Stress injector unavailable in this build</strong>
-          <p>The synthetic self-test injector is compiled out of the CORE release build for safety. You are currently running a release build of the firmware and have access to detection, export, logs, and all monitoring features only.</p>
-          <p class="stress-disabled-hint">
-            To enable the full stress-test harness (tuning knobs, 4 attack profiles, presets), re-flash with the PlatformIO internal environment:
-            <code>pio run -e internal -t upload ; pio run -e internal -t uploadfs</code>
-          </p>
-        </div>
-      </div>
-
-      <!-- ENABLE_STRESS_SIM=1 builds only -->
-      <div id="stressEnabledWrap">
-
-      <div style="background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25); border-radius: 6px; padding: 10px 12px; margin: 8px 0 14px 0;">
-        <p style="color: #fca5a5; font-size: 12px; margin: 0; line-height: 1.5;">
-          <strong>&#9888; HEAVY PER-ENVIRONMENT TUNING REQUIRED</strong> &mdash; Detection thresholds in <code>config.h</code> Section 3 are lab-defaults for a quiet residential setting. They WILL false-positive in busy venues (conferences, LAN parties, dorms).
-          Use the Stress Test presets below to dial in your thresholds BEFORE trusting the alarm in production. Portfolio demo preset: <em>MICROBURST DEAUTH @ 120 pkt/s</em>.
-        </p>
-      </div>
-
-      <div class="control-row">
-        <div style="flex:1;">
-          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-            <button id="stressTestToggle" class="btn success" style="min-width: 180px; padding: 10px 16px;" onclick="toggleStressTest()">
-              ▶ START STRESS TEST
-            </button>
-            <button class="btn" onclick="applyPreset('handshake')">🎯 Handshake Grabber</button>
-            <button class="btn" onclick="applyPreset('coffeeshop')">☕ Noisy Coffee Shop</button>
-            <button class="btn" onclick="applyPreset('classroom')">🏫 Classroom Safe</button>
-            <div id="stressTestBadge" class="stresstest-badge stresstest-idle">IDLE</div>
-            <div class="stresstest-stats">
-              <span>Injected: <strong id="stressTestInjected">0</strong> pkts</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="stress-controls-grid" id="stressControlsGrid" style="margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
-
-        <div class="stress-control-card">
-          <div class="stress-control-label">
-            <span>Packet Rate</span>
-            <strong id="rateLabel">50 pkt/s</strong>
-          </div>
-          <input type="range" id="stressRate" min="1" max="1000" value="50" class="stress-slider" oninput="onStressRateChange(this.value)" onchange="submitStressConfig()">
-          <div class="stress-slider-marks"><span>1</span><span>250</span><span>500</span><span>750</span><span>1000</span></div>
-        </div>
-
-        <div class="stress-control-card">
-          <div class="stress-control-label"><span>Attack Profile</span></div>
-          <select id="stressProfile" class="btn" style="width:100%;" onchange="submitStressConfig()">
-            <option value="0">CONSTANT &mdash; flat stream (baseline)</option>
-            <option value="1">BURSTY &mdash; 3s ON / 1s OFF square</option>
-            <option value="2" selected>MICROBURST &mdash; handshake-grabber replica</option>
-            <option value="3">MIXED &mdash; random frame-type churn</option>
-          </select>
-        </div>
-
-        <div class="stress-control-card">
-          <div class="stress-control-label"><span>Inject Frame Types</span></div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-            <label class="chk"><input type="checkbox" id="ftDeauth" checked onchange="submitStressConfig()"> Deauth (0x0C)</label>
-            <label class="chk"><input type="checkbox" id="ftDisassoc" onchange="submitStressConfig()"> Disassoc (0x0A)</label>
-            <label class="chk"><input type="checkbox" id="ftAssoc" onchange="submitStressConfig()"> Assoc Req (0x00)</label>
-            <label class="chk"><input type="checkbox" id="ftProbe" onchange="submitStressConfig()"> Probe Req (0x04)</label>
-          </div>
-        </div>
-
-        <div class="stress-control-card">
-          <div class="stress-control-label"><span>RSSI Range (dBm)</span></div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="number" id="rssiMin" value="-85" min="-110" max="0" class="stress-num" onchange="submitStressConfig()">
-            <span style="color: var(--muted);">&hellip;</span>
-            <input type="number" id="rssiMax" value="-40" min="-110" max="0" class="stress-num" onchange="submitStressConfig()">
-          </div>
-        </div>
-
-        <div class="stress-control-card">
-          <div class="stress-control-label"><span>MAC Entropy</span></div>
-          <label class="chk"><input type="checkbox" id="macRand" onchange="submitStressConfig()"> Randomize src/dst hashes per pkt</label>
-          <div style="font-size: 11px; color: var(--muted); margin-top: 6px;">Tests the MAC-entropy anomaly feature; spikes entropy when many spoofed stations are emulated.</div>
-        </div>
-
-        <div class="stress-control-card">
-          <div class="stress-control-label"><span>Burst Timing (ms)</span></div>
-          <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 12px;">
-            <span style="color: var(--muted);">BURSTY ON</span>
-            <input type="number" id="burstOn" value="3000" min="1" class="stress-num" onchange="submitStressConfig()">
-            <span style="color: var(--muted);">BURSTY OFF</span>
-            <input type="number" id="burstOff" value="1000" min="1" class="stress-num" onchange="submitStressConfig()">
-            <span style="color: var(--muted);">&#956;Burst ON</span>
-            <input type="number" id="uburstOn" value="1200" min="1" class="stress-num" onchange="submitStressConfig()">
-            <span style="color: var(--muted);">&#956;Burst OFF</span>
-            <input type="number" id="uburstOff" value="4000" min="1" class="stress-num" onchange="submitStressConfig()">
-          </div>
-        </div>
-
-        <div class="stress-control-card">
-          <div class="stress-control-label"><span>Misc</span></div>
-          <label class="chk"><input type="checkbox" id="spreadCh" onchange="submitStressConfig()"> Spread channels &plusmn;2</label>
-          <div style="margin-top: 8px;">
-            <div class="stress-control-label" style="margin-bottom: 4px;">
-              <span>Loop cadence</span>
-              <strong id="loopLabel">1000 ms</strong>
-            </div>
-            <input type="range" id="stressLoop" min="100" max="5000" step="100" value="1000" class="stress-slider" oninput="document.getElementById('loopLabel').innerText=this.value+' ms'" onchange="submitStressConfig()">
-          </div>
-        </div>
-
-      </div>
-
-      <div id="stressTestHint" style="margin-top: 12px; display: none;"></div>
-
-      </div><!-- /stressEnabledWrap -->
-    </section>
-
     <section class="stats-panel">
       <div class="section-title" style="font-weight: 600; font-size: 14px;">System Statistics</div>
-      <div class="stats-grid">
-        <div class="stat-item">
+      <div class="cards">
+        <div class="card">
           <div class="stat-label">Total Events</div>
           <div class="stat-value" id="totalEvents">0</div>
         </div>
-        <div class="stat-item">
+        <div class="card">
           <div class="stat-label">High Threats</div>
           <div class="stat-value" id="highThreats" style="color: var(--critical);">0</div>
         </div>
-        <div class="stat-item">
+        <div class="card">
           <div class="stat-label">System Uptime</div>
           <div class="stat-value" id="systemUptime">0s</div>
         </div>
-        <div class="stat-item">
+        <div class="card">
           <div class="stat-label">Response Time</div>
           <div class="stat-value" id="responseTime">0ms</div>
         </div>
+      </div>
+    </section>
+
+    <section class="recommendations-panel" id="recommendationsPanel">
+      <h3>Recommendations</h3>
+      <div id="recsEmptyHint" style="color: var(--muted); font-size: 13px; padding: 10px 4px;">
+        No recommendations yet. Run a stress test for 30s+ or deploy to a venue for 10 minutes; the auto-tuner will suggest threshold tweaks here.
+      </div>
+      <div id="recsList" style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;"></div>
+    </section>
+
+    <section class="detection-config-panel" id="detectionConfigPanel">
+      <div class="detection-header">
+        <h3>Detection Thresholds — Runtime Tuning</h3>
+        <div id="detectModeHint" class="detection-hint">
+          Internal builds can edit and persist thresholds to NVS. Core builds show the active values only.
+        </div>
+      </div>
+
+      <div class="detect-controls-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
+        <div class="stress-control-card">
+          <div class="stress-control-label">
+            <span>Deauth Threshold (pkt/s)</span>
+            <strong id="deauthEffLabel">2.0</strong>
+          </div>
+          <input type="number" id="detectDeauth" min="0.1" max="100" step="0.1" class="stress-num" placeholder="0 = use default">
+          <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+            Raising reduces deauth-flood sensitivity (use for conferences, LAN parties).
+          </div>
+        </div>
+
+        <div class="stress-control-card">
+          <div class="stress-control-label">
+            <span>Assoc Threshold (pkt/s)</span>
+            <strong id="assocEffLabel">100.0</strong>
+          </div>
+          <input type="number" id="detectAssoc" min="5" max="5000" step="1" class="stress-num" placeholder="0 = use default">
+          <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+            Raising quiets MAC-spoof / assoc-flood false-positives in crowded venues.
+          </div>
+        </div>
+
+        <div class="stress-control-card">
+          <div class="stress-control-label">
+            <span>RSSI Variance Threshold</span>
+            <strong id="rssiVarEffLabel">15.0</strong>
+          </div>
+          <input type="number" id="detectRssiVar" min="1" max="100" step="1" class="stress-num" placeholder="0 = use default">
+          <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+            Raising quiets jam-detection false-positives in RF-dense areas (coffee shops).
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top: 14px;">
+        <button id="detectApplyBtn" class="btn success" onclick="submitDetectConfig()">✓ Apply &amp; Save to NVS</button>
+        <button id="detectResetBtn" class="btn" onclick="resetDetectDefaults()">↺ Reset to config.h defaults</button>
+        <div id="detectCfgBadge" class="stresstest-badge stresstest-idle">IDLE</div>
+      </div>
+      <div id="detectCfgMsg" style="margin-top: 10px; font-size: 12px; color: var(--muted);"></div>
+    </section>
+
+    <section class="stresstest-panel" id="stressTestPanel">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <h3>Stress Test — Synthetic Injector</h3>
+        <div id="stressTestBadge" class="stresstest-badge stresstest-idle">IDLE</div>
+      </div>
+      <div id="stressDisabledBanner" class="stress-disabled-banner" style="display: none;">
+        <div class="stress-disabled-icon">⚠</div>
+        <div class="stress-disabled-text">
+          <strong>Core build: stress injection is unavailable</strong>
+          <p>The synthetic injector is compiled out of the public build. Internal builds expose the full lab controls.</p>
+        </div>
+      </div>
+      <div id="stressEnabledWrap">
+        <div class="stresstest-stats">Injected packets: <strong id="stressTestInjected">0</strong></div>
+        <div id="stressTestHint">Use the synthetic injector for lab demos and to force the detection heuristics to react.</div>
+        <div class="label-buttons" style="margin-top: 10px;">
+          <button id="stressTestToggle" class="btn" onclick="toggleStressTest()">▶ START STRESS TEST</button>
+          <button class="btn" onclick="applyPreset('classroom')">Classroom</button>
+          <button class="btn" onclick="applyPreset('handshake')">Handshake Grabber</button>
+          <button class="btn" onclick="applyPreset('coffeeshop')">Coffee Shop</button>
+        </div>
+        <div id="stressControlsGrid" class="detect-controls-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px;">
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>Rate</span><strong id="rateLabel">50 pkt/s</strong></div>
+            <input id="stressRate" type="number" class="stress-num" min="1" max="2000" step="1" value="50">
+          </div>
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>Profile</span></div>
+            <select id="stressProfile" class="stress-num">
+              <option value="0">Constant Stream</option>
+              <option value="1">Bursty Square</option>
+              <option value="2">Microburst Deauth</option>
+              <option value="3">Mixed Frame Types</option>
+            </select>
+          </div>
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>Frame Types</span></div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              <label class="chk"><input id="ftDeauth" type="checkbox" checked> Deauth</label>
+              <label class="chk"><input id="ftDisassoc" type="checkbox"> Disassoc</label>
+              <label class="chk"><input id="ftAssoc" type="checkbox"> Assoc</label>
+              <label class="chk"><input id="ftProbe" type="checkbox"> Probe</label>
+            </div>
+          </div>
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>RSSI Range</span></div>
+            <div style="display:flex; gap:8px;">
+              <input id="rssiMin" type="number" class="stress-num" min="-110" max="0" value="-85">
+              <input id="rssiMax" type="number" class="stress-num" min="-110" max="0" value="-40">
+            </div>
+          </div>
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>MAC Randomize</span></div>
+            <label class="chk"><input id="macRand" type="checkbox"> Randomize per-packet</label>
+          </div>
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>Burst Timing</span></div>
+            <div style="display:flex; gap:8px;">
+              <input id="burstOn" type="number" class="stress-num" min="1" value="3000">
+              <input id="burstOff" type="number" class="stress-num" min="1" value="1000">
+            </div>
+          </div>
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>Microburst Timing</span></div>
+            <div style="display:flex; gap:8px;">
+              <input id="uburstOn" type="number" class="stress-num" min="1" value="1200">
+              <input id="uburstOff" type="number" class="stress-num" min="1" value="4000">
+            </div>
+          </div>
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>Spread Channels</span></div>
+            <label class="chk"><input id="spreadCh" type="checkbox"> Vary channels ±2</label>
+          </div>
+          <div class="stress-control-card">
+            <div class="stress-control-label"><span>Loop Delay</span><strong id="loopLabel">1000 ms</strong></div>
+            <input id="stressLoop" type="number" class="stress-num" min="1" step="1" value="1000">
+          </div>
         </div>
       </div>
     </section>
 
     <section class="log">
-      <h3>Recent Events & Mitigation Recommendations</h3>
+      <h3>Event Log</h3>
       <div id="logArea" class="log-area">System online - Monitoring airspace...</div>
     </section>
   </main>
