@@ -328,8 +328,8 @@ void taskFeatureExtraction(void *pvParameters) {
 
             // Recommendation generators — run outside the critical section so
             // they don't starve the radio controller of the mutex.
+            recCheckLiveThreatResponse(tempReport, tempFeatures);
             recCheckBaselineDrift();
-            recCheckStressPostCalibration();
         }
     }
 }
@@ -364,12 +364,15 @@ void taskLogging(void *pvParameters) {
       Event event;
       event.timestamp = millis();
       event.threat_score = threatScore;
-      
-      // Extract raw C-string from the Arduino String
-      event.classification = classification.c_str(); 
 
-      // Call the static class method directly instead of using a pointer
-      Logger::logEvent(event); 
+      // Copy the classification string into the fixed notes buffer so
+      // event.classification never dangles — the local String is destroyed
+      // at the end of this block, invalidating any raw c_str() pointer.
+      strncpy(event.notes, classification.c_str(), sizeof(event.notes) - 1);
+      event.notes[sizeof(event.notes) - 1] = '\0';
+      event.classification = event.notes;
+
+      Logger::logEvent(event);
 
       // Thread-safe counter update
       if (xSemaphoreTake(globalStateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {

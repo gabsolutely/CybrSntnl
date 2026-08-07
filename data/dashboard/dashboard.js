@@ -483,18 +483,26 @@ async function fetchData() {
 
         // 3. Threat logic, trusting the tightly-coupled backend classification
         let displayClass = validatedData.classification.toUpperCase();
-        let classColor = "#10B981"; // Default Green (SAFE)
-        let lightClass = "safe";
+        let displayText = displayClass;
+        let classColor = "#10B981"; // Default Green (NOMINAL)
+        let lightClass = "nominal";
 
-        if (displayClass === "CRITICAL") {
-            classColor = "#EF4444"; // Red
-            lightClass = "critical";
-        } else if (displayClass === "RECONNAISSANCE") {
-            classColor = "#F59E0B"; // Orange
+        if (displayClass === "SAFE" || displayClass === "NOMINAL") {
+            displayText = "NOMINAL";
+            classColor = "#10B981";
+            lightClass = "nominal";
+        } else if (displayClass === "WARNING" || displayClass === "ELEVATED") {
+            displayText = "ELEVATED";
+            classColor = "#EAF63B";
             lightClass = "elevated";
-        } else if (displayClass === "WARNING") {
-            classColor = "#EAF63B"; // Yellow
-            lightClass = "low";
+        } else if (displayClass === "RECONNAISSANCE" || displayClass === "ACTIVE") {
+            displayText = "ACTIVE";
+            classColor = "#F59E0B";
+            lightClass = "active";
+        } else if (displayClass === "CRITICAL") {
+            displayText = "CRITICAL";
+            classColor = "#EF4444";
+            lightClass = "critical";
         }
 
         // Trigger the visual UI alerts if a critical event is coming down the pipe
@@ -555,6 +563,7 @@ async function fetchData() {
 
         // --- Detection Thresholds & Recommendations UI -----
         updateDetectionUI(validatedData);
+        updateEventSummaryUI(validatedData);
         updateRecommendationsUI(validatedData);
 
         updateHealthScore(validatedData);
@@ -1131,25 +1140,51 @@ function updateDetectionUI(d) {
     const resetBtn     = el('detectResetBtn');
     const modeHint     = el('detectModeHint');
     const badge        = el('detectCfgBadge');
+    const banner       = el('detectDisabledBanner');
+    const wrap         = el('detectEnabledWrap');
+
+    if (!isInternal) {
+        // CORE build: minimal/locked-down presence. Show banner ONLY, hide
+        // entire enabled UI grid, no half-disabled inputs lingering around.
+        if (banner) banner.style.display = 'flex';
+        if (wrap)   wrap.style.display   = 'none';
+        if (modeHint) modeHint.style.display = 'none';
+
+        [deauthInput, assocInput, rssiVarInput].forEach(input => {
+            if (input) input.disabled = true;
+        });
+        [applyBtn, resetBtn].forEach(btn => {
+            if (btn) btn.disabled = true;
+        });
+        if (badge) {
+            badge.className = 'stresstest-badge stresstest-unsupported';
+            badge.innerText = 'CORE';
+        }
+        // Still clear form sig so we re-hydrate cleanly if mode changes
+        lastDetectCfgSig = '';
+        return;
+    }
+
+    // INTERNAL build: interactive panel — hide banner, reveal grid
+    if (banner) banner.style.display = 'none';
+    if (wrap)   wrap.style.display   = '';
+    if (modeHint) {
+        modeHint.style.display = '';
+        modeHint.innerText = 'Internal builds can edit and persist thresholds to NVS.';
+    }
 
     [deauthInput, assocInput, rssiVarInput].forEach(input => {
         if (input) {
-            input.disabled = !isInternal;
-            input.style.opacity = isInternal ? '1' : '0.7';
+            input.disabled = false;
+            input.style.opacity = '1';
         }
     });
     [applyBtn, resetBtn].forEach(btn => {
-        if (btn) btn.disabled = !isInternal;
+        if (btn) btn.disabled = false;
     });
-
-    if (modeHint) {
-        modeHint.innerText = isInternal
-            ? 'Internal builds can edit and persist thresholds to NVS.'
-            : 'Core build: thresholds are shown for reference only. Editable controls are disabled until the firmware is rebuilt as internal.';
-    }
     if (badge) {
-        badge.className = 'stresstest-badge ' + (isInternal ? 'stresstest-idle' : 'stresstest-unsupported');
-        badge.innerText = isInternal ? 'IDLE' : 'CORE';
+        badge.className = 'stresstest-badge stresstest-idle';
+        badge.innerText = 'IDLE';
     }
 
     // Signature-based hydration — don't fight the user if they're actively typing
@@ -1290,6 +1325,67 @@ function formatAgeMs(ms) {
     return h + 'h ago';
 }
 
+function isTuningRecommendation(r) {
+    const from = Number(r && r.from);
+    const to = Number(r && r.to);
+    return Number.isFinite(from) && Number.isFinite(to) && from > 0 && to > 0;
+}
+
+function formatDurationLabel(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return 'live';
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${s % 60}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+}
+
+function updateEventSummaryUI(d) {
+    const emptyEl = document.getElementById('eventSummaryEmpty');
+    const contentEl = document.getElementById('eventSummaryContent');
+    if (!emptyEl || !contentEl) return;
+
+    const summary = d && d.event_summary ? d.event_summary : null;
+    if (!summary || !summary.present) {
+        emptyEl.style.display = '';
+        contentEl.style.display = 'none';
+        contentEl.innerHTML = '';
+        return;
+    }
+
+    emptyEl.style.display = 'none';
+    const cls = String(summary.classification || 'NOMINAL').toUpperCase();
+    const attackType = String(summary.attack_type || 'Event').replace(/[<>]/g, '');
+    const recommendation = String(summary.recommendation || '').replace(/[<>]/g, '');
+    const source = String(summary.source || 'event').toLowerCase() === 'stress' ? 'Stress test' : 'Threat event';
+    const duration = summary.duration_ms > 0 ? formatDurationLabel(summary.duration_ms) : 'live';
+    const channel = Number(summary.channel) > 0 ? Number(summary.channel) : '—';
+    const score = Number(summary.threat_score || 0).toFixed(1);
+
+    contentEl.innerHTML = `
+        <div class="summary-card">
+            <div class="summary-title">${source}</div>
+            <div class="rec-reason" style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">${cls} • ${attackType}</div>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-label">Peak</div>
+                    <div class="summary-value">${score}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Channel</div>
+                    <div class="summary-value">${channel}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Duration</div>
+                    <div class="summary-value">${duration}</div>
+                </div>
+            </div>
+            <div class="rec-reason" style="margin-top: 8px; color: #cbd5e1;">${recommendation}</div>
+        </div>`;
+    contentEl.style.display = '';
+}
+
 function updateRecommendationsUI(d) {
     const emptyHint = document.getElementById('recsEmptyHint');
     const listEl    = document.getElementById('recsList');
@@ -1314,21 +1410,25 @@ function updateRecommendationsUI(d) {
         const sev = recSeverityBadge(r.severity);
         const param = String(r.parameter || '').replace(/_/g, ' ');
         const age = formatAgeMs(r.age_ms);
+        const canApply = isInternal && isTuningRecommendation(r);
+        const showValues = isTuningRecommendation(r);
+        const paramLabel = showValues ? param : 'Mitigation';
         html.push(`
             <div class="rec-card ${recSeverityClass(r.severity)}">
                 <div class="rec-head">
                     <span class="${sev.cls}">${sev.txt}</span>
                     <span class="rec-age">${age}</span>
                 </div>
-                <div class="rec-param">${param}</div>
+                <div class="rec-param">${paramLabel}</div>
                 <div class="rec-reason">${String(r.reason || '').replace(/[<>]/g, '')}</div>
                 <div class="rec-foot">
-                    <div class="rec-values">
-                        <span class="rec-val-from">${Number(r.from).toFixed(1)}</span>
-                        <span class="rec-arrow">→</span>
-                        <span class="rec-val-to">${Number(r.to).toFixed(1)}</span>
-                    </div>
-                    <button class="btn btn-rec-apply" onclick="applyRecommendation(${i})" ${isInternal ? '' : 'disabled'}>✓ Apply suggestion</button>
+                    ${showValues ? `
+                        <div class="rec-values">
+                            <span class="rec-val-from">${Number(r.from).toFixed(1)}</span>
+                            <span class="rec-arrow">→</span>
+                            <span class="rec-val-to">${Number(r.to).toFixed(1)}</span>
+                        </div>` : ''}
+                    ${canApply ? `<button class="btn btn-rec-apply" onclick="applyRecommendation(${i})">✓ Apply suggestion</button>` : ''}
                 </div>
             </div>`);
     }

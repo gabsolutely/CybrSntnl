@@ -214,7 +214,7 @@ void Dashboard::handleData() {
 
     // Protected snapshot read of thread-safe global states
     if (xSemaphoreTake(globalStateMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
-        
+
         // Static rolling average states (retained across network poll ticks)
         static float dynamicAvgThreat = 0.0f;
         static float dynamicAvgEntropy = 0.0f;
@@ -238,16 +238,33 @@ void Dashboard::handleData() {
         doc["last_classification"] = currentThreatReport.classification;
 
         doc["current_channel"] = currentChannel;
-        doc["channel_mode"] = (currentChannelMode == MODE_AUTO_HOP) ? "SCANNING" : 
+        doc["channel_mode"] = (currentChannelMode == MODE_AUTO_HOP) ? "SCANNING" :
                               (currentChannelMode == MODE_THREAT_LOCK) ? "LOCKED" : "MANUAL";
-        
+
         // Match exact keys from your Javascript validator schema as raw values
         doc["avg_rssi"] = currentFeatures.avg_rssi;
         doc["mac_entropy"] = currentFeatures.mac_entropy;
         doc["avg_entropy"] = dynamicAvgEntropy;
-        doc["packet_rate"] = currentFeatures.assoc_rate; 
-        
+        doc["packet_rate"] = currentFeatures.assoc_rate;
+
         doc["system_status"] = "GOOD";
+
+        // =========================================================================
+        // EVENT SUMMARY — read within mutex for thread safety
+        // =========================================================================
+        {
+            JsonObject summary = doc["event_summary"].to<JsonObject>();
+            summary["present"] = latestEventSummary.present;
+            summary["timestamp"] = latestEventSummary.timestamp;
+            summary["classification"] = latestEventSummary.classification;
+            summary["attack_type"] = latestEventSummary.attack_type;
+            summary["recommendation"] = latestEventSummary.recommendation;
+            summary["source"] = latestEventSummary.source;
+            summary["threat_score"] = latestEventSummary.threat_score;
+            summary["channel"] = latestEventSummary.channel;
+            summary["duration_ms"] = latestEventSummary.duration_ms;
+        }
+
         xSemaphoreGive(globalStateMutex);
     } else {
         doc["system_status"] = "MUTEX_TIMEOUT";
@@ -259,6 +276,18 @@ void Dashboard::handleData() {
         doc["mac_entropy"] = 0.00;
         doc["avg_entropy"] = 0.00;
         doc["packet_rate"] = 0;
+
+        // Empty event summary when mutex fails
+        JsonObject summary = doc["event_summary"].to<JsonObject>();
+        summary["present"] = false;
+        summary["timestamp"] = 0;
+        summary["classification"] = "";
+        summary["attack_type"] = "";
+        summary["recommendation"] = "";
+        summary["source"] = "";
+        summary["threat_score"] = 0.0;
+        summary["channel"] = 0;
+        summary["duration_ms"] = 0;
     }
 
     doc["uptime"] = millis() / 1000;

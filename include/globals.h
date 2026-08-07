@@ -37,6 +37,18 @@ struct RecEntry {
     char          reason[96];
 };
 
+struct EventSummary {
+    bool          present;
+    unsigned long timestamp;
+    char          classification[16];
+    char          attack_type[32];
+    char          recommendation[96];
+    char          source[16];
+    float         threat_score;
+    int           channel;
+    unsigned long duration_ms;
+};
+
 // =============================================================================
 // INTER-CORE STATE (externs — memory lives in globals.cpp)
 // =============================================================================
@@ -51,6 +63,7 @@ extern String          currentClassification;
 extern bool            mitigationActive;
 extern unsigned long   lastLogTime;
 extern int             eventCount;
+extern EventSummary    latestEventSummary;
 
 extern ChannelMode currentChannelMode;
 extern uint8_t     currentChannel;
@@ -119,7 +132,7 @@ String recParamStr(RecParameter p);
 
 // Recommendation source generators
 void   recCheckBaselineDrift();
-void   recCheckStressPostCalibration();
+void   recCheckLiveThreatResponse(const ThreatReport& report, const FeatureVec& features);
 
 // Effective-value helpers (falls back to config.h defaults if globals are 0 sentinel)
 float  effDeauthThreshold();

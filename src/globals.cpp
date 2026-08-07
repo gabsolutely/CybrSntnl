@@ -14,6 +14,7 @@ unsigned long lastFeatureUpdate = 0;
 float currentThreatScore = 0.0;
 String currentClassification = "benign";
 ThreatReport currentThreatReport;
+EventSummary latestEventSummary = {false, 0, "", "", "", "", 0.0f, 0, 0};
 
 // Allocate the actual memory for the externs
 bool mitigationActive = false;
@@ -156,6 +157,52 @@ void recPush(const RecEntry& entry) {
     if (globalStateMutex != NULL) xSemaphoreGive(globalStateMutex);
 }
 
+void setLatestEventSummary(const char* classification, const char* attackType, const char* recommendation,
+                           float threatScore, int channel, unsigned long durationMs, const char* source) {
+    if (!classification || !*classification) classification = "NOMINAL";
+    if (!attackType || !*attackType) attackType = "Event";
+    if (!recommendation || !*recommendation) recommendation = "Review the current airspace conditions.";
+    if (!source || !*source) source = "event";
+
+    if (globalStateMutex != NULL) xSemaphoreTake(globalStateMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS));
+
+    latestEventSummary.present = true;
+    latestEventSummary.timestamp = millis();
+    latestEventSummary.threat_score = threatScore;
+    latestEventSummary.channel = channel;
+    latestEventSummary.duration_ms = durationMs;
+
+    strncpy(latestEventSummary.classification, classification, sizeof(latestEventSummary.classification) - 1);
+    latestEventSummary.classification[sizeof(latestEventSummary.classification) - 1] = '\0';
+
+    strncpy(latestEventSummary.attack_type, attackType, sizeof(latestEventSummary.attack_type) - 1);
+    latestEventSummary.attack_type[sizeof(latestEventSummary.attack_type) - 1] = '\0';
+
+    strncpy(latestEventSummary.recommendation, recommendation, sizeof(latestEventSummary.recommendation) - 1);
+    latestEventSummary.recommendation[sizeof(latestEventSummary.recommendation) - 1] = '\0';
+
+    strncpy(latestEventSummary.source, source, sizeof(latestEventSummary.source) - 1);
+    latestEventSummary.source[sizeof(latestEventSummary.source) - 1] = '\0';
+
+    if (globalStateMutex != NULL) xSemaphoreGive(globalStateMutex);
+}
+
+void clearLatestEventSummary() {
+    if (globalStateMutex != NULL) xSemaphoreTake(globalStateMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS));
+
+    latestEventSummary.present = false;
+    latestEventSummary.timestamp = 0;
+    latestEventSummary.threat_score = 0.0f;
+    latestEventSummary.channel = 0;
+    latestEventSummary.duration_ms = 0;
+    latestEventSummary.classification[0] = '\0';
+    latestEventSummary.attack_type[0] = '\0';
+    latestEventSummary.recommendation[0] = '\0';
+    latestEventSummary.source[0] = '\0';
+
+    if (globalStateMutex != NULL) xSemaphoreGive(globalStateMutex);
+}
+
 RecEntry recGet(uint8_t index) {
     RecEntry e = {0, REC_INFO, REC_PARAM_DEAUTH, 0.0f, 0.0f, {0}};
     if (index >= recRingCount) return e;
@@ -223,11 +270,6 @@ void recCheckBaselineDrift() {
     const float curAssoc   = effAssocThreshold();
     const float curRssiVar = effRssiVarThreshold();
 
-    RecParameter param;
-    float from_v, to_v;
-    bool  push = false;
-    char  reason[96] = {0};
-
     if (hitWarning && f.disassoc_rate > 0 && f.disassoc_rate < (curDeauth * 0.8f)) {
         baselineFalseWarningCount[0]++;
     }
@@ -247,122 +289,127 @@ void recCheckBaselineDrift() {
             lastRecBaselinePush[p] = now;
             baselineFalseWarningCount[p] = 0;
 
-            if (p == 0) {
-                param = REC_PARAM_DEAUTH;
-                from_v = curDeauth;
-                to_v   = curDeauth * 2.0f;
-                snprintf(reason, sizeof(reason), "%lu false WARNINGs at baseline — raise DEAUTH to reduce noise", cnt);
-            } else if (p == 1) {
-                param = REC_PARAM_ASSOC;
-                from_v = curAssoc;
-                to_v   = curAssoc * 1.5f;
-                snprintf(reason, sizeof(reason), "%lu false WARNINGs at baseline — raise ASSOC to reduce noise", cnt);
-            } else {
-                param = REC_PARAM_RSSI_VAR;
-                from_v = curRssiVar;
-                to_v   = curRssiVar * 1.5f;
-                snprintf(reason, sizeof(reason), "%lu false WARNINGs at baseline — raise RSSI_VAR to reduce noise", cnt);
-            }
-            push = true;
+            // Baseline false-positive clusters are tracked, but we no longer emit
+            // tuning suggestions here. Mitigation guidance is surfaced from the
+            // live attack-profile recommendations when a real threat is detected.
+            (void)cnt;
             break;
         }
-    }
-
-    if (push) {
-        RecEntry e;
-        e.timestamp = now;
-        e.severity  = REC_SUGGEST;
-        e.parameter = param;
-        e.from_value = from_v;
-        e.to_value   = to_v;
-        strncpy(e.reason, reason, sizeof(e.reason) - 1);
-        recPush(e);
     }
 }
 
 // =============================================================================
-// RECOMMENDATION SOURCE B — STRESS POST-CALIBRATION (after stress test ends)
-// If user ran stress >= 30s but threat never reached WARNING, recommend
-// LOWERING the threshold so it actually catches the test signal.
+// RECOMMENDATION SOURCE B — DISABLED
+// Previously handled stress post-calibration, now unified with live threat response.
+// Users can calibrate thresholds themselves via the /config endpoint.
 // =============================================================================
-static bool postCalPending = false;
-static unsigned long postCalPeakThreatTime = 0;
-static float postCalMaxThreat = 0.0f;
-static unsigned long postCalStressDurationMs = 0;
 
-void recCheckStressPostCalibration() {
-    // Track threat-peak WHILE stress is running
-    if (stressTestActive) {
-        float s = 0.0f;
-        if (globalStateMutex != NULL && xSemaphoreTake(globalStateMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) == pdTRUE) {
-            s = currentThreatReport.threat_score;
-            xSemaphoreGive(globalStateMutex);
+// =============================================================================
+// RECOMMENDATION SOURCE C — LIVE THREAT RESPONSE (every scoring window)
+// When a specific attack type is classified, look up the ATTACK_PROFILES
+// remediation table and push mitigation/prevention guidance.
+// Debounced per attack type so we don't flood the ring every 5s.
+// =============================================================================
+static unsigned long lastRecAttackPush[ATTACK_PROFILES_COUNT + 1] = {0};
+
+void recCheckLiveThreatResponse(const ThreatReport& report, const FeatureVec& features) {
+    if (report.level < THREAT_LOW) return;
+    unsigned long now = millis();
+
+    // Resolve attack type by exact matching attack_type against table.
+    int attackIdx = -1;
+    for (int i = 0; i < (int)ATTACK_PROFILES_COUNT; i++) {
+        if (report.attack_type &&
+            ATTACK_PROFILES[i].attack_type &&
+            strcmp(report.attack_type, ATTACK_PROFILES[i].attack_type) == 0) {
+            attackIdx = i;
+            break;
         }
-        if (s > postCalMaxThreat) {
-            postCalMaxThreat = s;
-            postCalPeakThreatTime = millis();
-        }
-        postCalPending = true;
+    }
+
+    // If no exact type match but threat is >= MEDIUM, fall back to generic
+    // suggestion at slot ATTACK_PROFILES_COUNT (debounce slot extra slot).
+    const bool genericFallback = (attackIdx < 0 && report.level >= THREAT_MEDIUM);
+
+    // Tiered debounce: CRITICAL=immediate, ACTIVE/MEDIUM=30s, ELEVATED/LOW=60s
+    unsigned long DEBOUNCE_MS;
+    if (report.level >= THREAT_HIGH) {
+        DEBOUNCE_MS = 0; // Immediate for critical threats
+    } else if (report.level >= THREAT_MEDIUM) {
+        DEBOUNCE_MS = 30UL * 1000UL; // 30s for active/medium
+    } else {
+        DEBOUNCE_MS = 60UL * 1000UL; // 60s for elevated/low
+    }
+
+    int pushIdx = (attackIdx >= 0) ? attackIdx : (int)ATTACK_PROFILES_COUNT;
+    if (DEBOUNCE_MS > 0 && (now - lastRecAttackPush[pushIdx]) < DEBOUNCE_MS) {
         return;
     }
+    lastRecAttackPush[pushIdx] = now;
 
-    // Stress just ended — analyze and push recommendations
-    if (postCalPending && stressTestStartTime != 0) {
-        postCalStressDurationMs = millis() - stressTestStartTime;
-        postCalPending = false;
+    const char* sevLabel = (report.level >= THREAT_HIGH)   ? "CRITICAL"
+                         : (report.level >= THREAT_MEDIUM) ? "ACTIVE"
+                         :                                    "ELEVATED";
 
-        if (postCalStressDurationMs >= 30000UL && postCalMaxThreat < 2.5f) {
-            // Ran a solid 30s+ but nothing tripped — figure out which threshold
-            // was too high by looking at which stress params were configured.
-            uint32_t cfgRate  = stressCfgRatePktPerSec   ? stressCfgRatePktPerSec   : STRESS_DEFAULT_RATE_PKTS_PER_SEC;
-            uint8_t  cfgMask  = (stressCfgFrameTypeMask != 0xFF) ? stressCfgFrameTypeMask : STRESS_DEFAULT_FRAME_TYPE_MASK;
+    // ---- 1. Remediation advice (always at least one card) ---------------
+    {
+        RecEntry e;
+        e.timestamp = now;
+        e.severity  = (report.level >= THREAT_HIGH)   ? REC_WARN
+                    : (report.level >= THREAT_MEDIUM) ? REC_SUGGEST
+                    :                                    REC_INFO;
+        e.parameter = REC_PARAM_DEAUTH;
+        e.from_value = report.threat_score;
+        e.to_value   = 0.0f;
 
-            RecEntry e;
-            e.timestamp = millis();
-            e.severity  = REC_WARN;
+        if (attackIdx >= 0) {
+            const char* rem = ATTACK_PROFILES[attackIdx].recommendation;
+            snprintf(e.reason, sizeof(e.reason), "[%s] %s — score %.1f (%s on ch%d)",
+                     sevLabel,
+                     (rem && *rem) ? rem : "Mitigate active attack",
+                     report.threat_score,
+                     report.attack_type ? report.attack_type : "threat",
+                     (features.peak_channel > 0) ? features.peak_channel : 1);
+        } else if (genericFallback) {
+            snprintf(e.reason, sizeof(e.reason),
+                     "[%s] Active threat detected (%.1f) — audit APs/STAs on ch%d and enable containment",
+                     sevLabel, report.threat_score,
+                     (features.peak_channel > 0) ? features.peak_channel : 1);
+        } else {
+            // LOW threat with unknown attack type - still show something
+            snprintf(e.reason, sizeof(e.reason),
+                     "[%s] Elevated activity detected (%.1f) — %s on ch%d",
+                     sevLabel, report.threat_score,
+                     report.attack_type ? report.attack_type : "unknown",
+                     (features.peak_channel > 0) ? features.peak_channel : 1);
+        }
+        recPush(e);
 
-            // Deauth frame types (bit 0 or 1)
-            if (cfgMask & 0x3) {
-                const float cur = effDeauthThreshold();
-                const float approxRate = (cfgRate * 0.6f);
-                const float target = approxRate * 0.9f;
-                if (target > 0.5f) {
-                    e.parameter = REC_PARAM_DEAUTH;
-                    e.from_value = cur;
-                    e.to_value   = target;
-                    snprintf(e.reason, sizeof(e.reason), "%lus stress: peak threat=%.1f — lower DEAUTH so injector is caught", postCalStressDurationMs/1000, postCalMaxThreat);
-                    recPush(e);
-                }
-            }
-            // Assoc frame types (bit 2)
-            if (cfgMask & 0x4) {
-                const float cur = effAssocThreshold();
-                const float approxRate = (cfgRate * 0.6f);
-                const float target = approxRate * 0.9f;
-                if (target > 10.0f) {
-                    e.parameter = REC_PARAM_ASSOC;
-                    e.from_value = cur;
-                    e.to_value   = target;
-                    snprintf(e.reason, sizeof(e.reason), "%lus stress: peak threat=%.1f — lower ASSOC so injector is caught", postCalStressDurationMs/1000, postCalMaxThreat);
-                    recPush(e);
-                }
-            }
-            // MIXED or spread-channels → RSSI variance
-            if ((cfgMask & 0x8) || stressCfgSpreadChannels == 1) {
-                const float cur = effRssiVarThreshold();
-                e.parameter = REC_PARAM_RSSI_VAR;
-                e.from_value = cur;
-                e.to_value   = cur * 0.6f;
-                snprintf(e.reason, sizeof(e.reason), "%lus stress: peak threat=%.1f — lower RSSI_VAR so variance is caught", postCalStressDurationMs/1000, postCalMaxThreat);
-                recPush(e);
-            }
+        // Update event summary for live threat display
+        const char* recText;
+        const char* attackText;
+
+        if (attackIdx >= 0) {
+            recText = ATTACK_PROFILES[attackIdx].recommendation;
+            attackText = report.attack_type;
+        } else if (genericFallback) {
+            recText = "Audit APs/STAs on this channel and enable containment";
+            attackText = "Active Threat";
+        } else {
+            // LOW threat with unknown attack type
+            recText = "Monitor airspace conditions for escalation";
+            attackText = report.attack_type ? report.attack_type : "Elevated Activity";
         }
 
-        // Reset accumulators for next run
-        postCalMaxThreat = 0.0f;
-        postCalStressDurationMs = 0;
-        stressTestStartTime = 0;
+        const char* source = stressTestActive ? "stress" : "event";
+        setLatestEventSummary(sevLabel, attackText, recText, report.threat_score,
+                             (features.peak_channel > 0) ? features.peak_channel : 1,
+                             0, source);
     }
+
+    // Recommendations are mitigation-focused only; threshold tuning is left to
+    // the operator and is intentionally not surfaced here.
+    (void)features;
 }
 
 // Initialize the global state
@@ -395,13 +442,12 @@ void initializeGlobals() {
     recRingHead = 0;
     recRingCount = 0;
     memset(recRing, 0, sizeof(recRing));
+    clearLatestEventSummary();
     baselineSampleCount = 0;
     memset(baselineFalseWarningCount, 0, sizeof(baselineFalseWarningCount));
     lastBaselineCheck = 0;
     memset(lastRecBaselinePush, 0, sizeof(lastRecBaselinePush));
-    postCalPending = false;
-    postCalMaxThreat = 0.0f;
-    stressTestStartTime = 0;
+    memset(lastRecAttackPush, 0, sizeof(lastRecAttackPush));
 }
 
 // Reset the global state

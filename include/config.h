@@ -171,17 +171,17 @@ static constexpr float RSSI_VARIANCE_THRESHOLD = 15.0f;  // variance → jam/ins
 // =============================================================================
 // Index maps 1:1 with ThreatLevel enum (0..3)
 static const char* const THREAT_CLASSIFICATIONS[] = {
-    "SAFE",
-    "WARNING",
-    "RECONNAISSANCE",
+    "NOMINAL",
+    "ELEVATED",
+    "ACTIVE",
     "CRITICAL"
 };
 
 static const char* const THREAT_RECOMMENDATIONS[] = {
-    "System secure. No anomalies detected.",
-    "Monitor local RF interference or directional attackers.",
-    "Verify network device authorization states.",
-    "Isolate target device. Threat lock engaged."
+    "Environment nominal. No active anomalies detected.",
+    "Elevated RF activity observed; review local conditions.",
+    "Active hostile activity detected; verify endpoint posture.",
+    "Critical threat; isolate the affected device and contain exposure."
 };
 
 // Attack-type → specific remediation (matched from the detection engine)
@@ -191,11 +191,11 @@ struct AttackProfile {
 };
 
 static const AttackProfile ATTACK_PROFILES[] = {
-    {"High Traffic Volume",                  "Deploy packet throttling and rate limiting protocols."},
-    {"Deauthentication Flood",               "Enable 802.11w Protected Management Frames (PMF) on AP."},
-    {"MAC Spoofing / Assoc Flood",           "Enable 802.11w Protected Management Frames (PMF) and MAC filtering."},
-    {"Signal Instability / Jamming Attempt", "Trigger frequency hopping or shift critical telemetry channels."},
-    {"Normal",                               "System secure. No anomalies detected."}
+    {"High Traffic Volume",                  "Apply rate limiting and packet throttling."},
+    {"Deauthentication Flood",               "Enable PMF and harden management frames."},
+    {"MAC Spoofing / Assoc Flood",           "Enable PMF and enforce MAC allowlisting."},
+    {"Signal Instability / Jamming Attempt", "Move to a cleaner channel or enable hopping."},
+    {"Normal",                               "Environment nominal. No active anomalies detected."}
 };
 static constexpr size_t ATTACK_PROFILES_COUNT = sizeof(ATTACK_PROFILES) / sizeof(ATTACK_PROFILES[0]);
 

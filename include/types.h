@@ -100,7 +100,7 @@ enum ThreatLevel {
 struct ThreatReport {
     ThreatLevel   level;
     float         threat_score;
-    const char*   classification;  // "SAFE" / "WARNING" / "RECONNAISSANCE" / "CRITICAL"
+    const char*   classification;  // "NOMINAL" / "ELEVATED" / "ACTIVE" / "CRITICAL"
     const char*   attack_type;     // e.g. "Deauthentication Flood"
     const char*   recommendation;  // remediation advice
     unsigned long timestamp;
