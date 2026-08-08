@@ -54,13 +54,16 @@ EMA-smoothed heuristics, not ML:
 - 4 attack-cadence self-test profiles (constant, bursty, microburst, mixed) for on-site validation
 - Runtime-tunable detection knobs via dashboard or `/stresstest` API
 - 3 one-click dashboard presets for common environments
-- Real-time dashboard served from a standalone AP
+- Live threshold tuning panel — adjust deauth/assoc/RSSI-variance thresholds from the dashboard and persist to NVS (internal builds only; core builds show the compiled defaults read-only)
+- Real-time dashboard served from a standalone AP, with system info (CPU, heap, flash, network, storage, active API endpoints) surfaced directly in the UI
 - Guerilla Sweep channel time-slicing (keeps the dashboard responsive during a full sweep)
 - Threat Lock — auto-engages above a threat score of 7.0, pins 80% of radio time to the offending channel
-- Manual channel override
-- SPIFFS-based dashboard assets + 7-day rotating CSV logs
+- Manual channel override with a full labeled 13-channel selector (non-overlapping channels 1/6/11 flagged)
+- Recommendations panel — surfaces mitigation guidance tied to the current or most recent detected threat
+- Last Event summary panel
+- Data export: JSON, CSV, and a generated report, in addition to SPIFFS-based 7-day rotating CSV logs
 - HTTP Basic Auth on all write endpoints and telemetry reads (`/health` stays open for monitoring)
-- Dual PlatformIO build environments — `core` (stress-sim compiled out) and `internal` (full harness)
+- Dual PlatformIO build environments — `core` (stress-sim and threshold-persistence compiled out) and `internal` (full harness)
 
 ## Hardware
 
@@ -105,7 +108,7 @@ This is a deliberately narrow-scope edge sensor, not a production security appli
 - **Single-radio blind spot.** The 20% blitz window means ~360ms of missed coverage on non-home channels every 3 seconds, by design. A burst landing squarely in three consecutive blitz windows will be missed. Fine for an alarm; not fine for forensics.
 - **2.4GHz only.** 5GHz/6GHz attacks — which most enterprise networks actually run on — are invisible to this hardware.
 - **Check local regulations.** Promiscuous-mode capture legality varies by jurisdiction. Only monitor networks you own or have explicit permission to monitor.
-- **Passive only, always.** It never transmits, blocks, or spoofs. This is intentional — a $5 device taped to a ceiling should not hold active-mitigation privileges over the airspace it watches.
+- **Passive only, for now.** The current build never transmits, blocks, or spoofs. Active mitigation is being researched for a future release — if that ships, it will be a deliberate, separate opt-in, not a default.
 
 **Pre-flight checklist:**
 1. Change `AP_SSID` / `AP_PASS` in `config.h`, Section 5
@@ -192,7 +195,7 @@ All runtime config is also exported in `/data` as `stress_cfg_*` fields for CSV/
 | Signal instability / jamming | Implemented (EMA RSSI variance) |
 | Rogue AP detection | Planned — v2 |
 | Per-MAC attribution | Planned — v2 |
-| Active mitigation | Researching for feasibility |
+| Active mitigation | Researching feasibility — no timeline yet. Note this is a shift from the original passive-only design stance; nothing in the current build transmits or mitigates |
 | Cloud sync / OTA | Planned — v2 |
 | 5GHz / 6GHz | Not possible on this hardware — targeted for v3 (ESP32-C5) |
 | PMF (802.11w) awareness | Advisory only — severity is not currently reduced for PMF-protected networks |
@@ -204,9 +207,10 @@ All runtime config is also exported in `/data` as `stress_cfg_*` fields for CSV/
 | Version | Target | Focus |
 |---|---|---|
 | v1.3.x (current) | — | Stability, queue-load health tuning, ESP32-S3 target |
-| v2.0 | X months | Rogue AP blocklist, per-MAC attribution, OTA updates, optional Pi coordinator |
-| v2.1 | X months | SIEM forwarding (Syslog/Splunk), PMF-aware allowlisting |
-| v3.0 | XX months | ESP32-C5 5GHz target, multi-radio reference design, on-device tinyML classifier |
+| v2.0 | TBD | Rogue AP blocklist, per-MAC attribution, OTA updates, optional Pi coordinator |
+| v2.1 | TBD | SIEM forwarding (Syslog/Splunk), PMF-aware allowlisting |
+| v3.0 | TBD | ESP32-C5 5GHz target, multi-radio reference design, on-device tinyML classifier |
 
 ## License
+
 MIT. Free to use, modify, distribute, and use commercially. Attribution appreciated but not required beyond the license text — see [LICENSE](LICENSE).
