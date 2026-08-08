@@ -34,10 +34,17 @@ const ui = {
   isrQueueVal: document.getElementById('isrQueueVal'),
   memoryVal: document.getElementById('memoryVal'),
   heapVal: document.getElementById('heapVal'),
-  sysUptime: document.getElementById('stat-system-uptime'),
-  highThreats: document.getElementById('stat-high-threats'),
-  totalEvents: document.getElementById('stat-total-events')
+  systemTime: document.getElementById('systemTime')
 };
+
+// Drive the header clock from the browser's local time (ESP32 has no RTC).
+// Runs immediately on load and then every second.
+(function tickClock() {
+  if (ui.systemTime) {
+    ui.systemTime.innerText = new Date().toLocaleTimeString();
+  }
+  setTimeout(tickClock, 1000);
+})();
 
 // make chart
 function makeChart(ctx, label, color) {
@@ -278,7 +285,12 @@ function validateApiResponse(data) {
     detect_eff_rssi_var: safeNum(data.detect_eff_rssi_var) || DETECT_DEFAULTS.rssi_var,
 
     // --- Recommendation engine (LRU ring, newest first) ---
-    recommendations: Array.isArray(data.recommendations) ? data.recommendations : []
+    recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
+
+    // --- Last event summary (set by recCheckLiveThreatResponse) ---
+    event_summary: (data.event_summary && typeof data.event_summary === 'object')
+      ? data.event_summary
+      : null
   };
 
   return validated;
@@ -530,7 +542,6 @@ async function fetchData() {
         if (ui.rssiVal) ui.rssiVal.innerText = validatedData.avg_rssi.toFixed(1) + ' dBm';
         if (ui.entropyVal) ui.entropyVal.innerText = validatedData.mac_entropy.toFixed(2);
         
-        // Inside your UI render loop / update function:
         if (ui.avg_threat) ui.avg_threat.innerText = `avg ${validatedData.avg_threat.toFixed(1)}`;
         if (ui.avg_rssi) ui.avg_rssi.innerText = `avg ${validatedData.avg_rssi.toFixed(1)}`;
         if (ui.avg_entropy) ui.avg_entropy.innerText = `avg ${validatedData.avg_entropy.toFixed(2)}`;
@@ -545,18 +556,9 @@ async function fetchData() {
         if (ui.memoryVal) ui.memoryVal.innerText = validatedData.heap_usage_percent.toFixed(1) + "%";
         if (ui.heapVal) ui.heapVal.innerText = "Free: " + validatedData.free_heap.toLocaleString() + " B";
         
-        if (ui.sysUptime) {
-            const minutes = Math.floor(validatedData.uptime / 60);
-            const seconds = validatedData.uptime % 60;
-            ui.sysUptime.innerText = `${minutes}m ${seconds}s`;
-        }
-        
         if (validatedData.threat_score >= 7.5) {
             highThreatCount++;
-            if (ui.highThreats) ui.highThreats.innerText = highThreatCount;
         }
-        
-        if (ui.totalEvents) ui.totalEvents.innerText = validatedData.packets_processed;
 
         // --- Stress Test UI updates -----
         updateStressTestUI(validatedData);
@@ -1359,7 +1361,9 @@ function updateEventSummaryUI(d) {
     const attackType = String(summary.attack_type || 'Event').replace(/[<>]/g, '');
     const recommendation = String(summary.recommendation || '').replace(/[<>]/g, '');
     const source = String(summary.source || 'event').toLowerCase() === 'stress' ? 'Stress test' : 'Threat event';
-    const duration = summary.duration_ms > 0 ? formatDurationLabel(summary.duration_ms) : 'live';
+    const isLive = !summary.duration_ms || summary.duration_ms === 0;
+    const durationLabel = isLive ? 'Active for' : 'Duration';
+    const durationValue = isLive ? 'live' : formatDurationLabel(summary.duration_ms);
     const channel = Number(summary.channel) > 0 ? Number(summary.channel) : '—';
     const score = Number(summary.threat_score || 0).toFixed(1);
 
@@ -1377,8 +1381,8 @@ function updateEventSummaryUI(d) {
                     <div class="summary-value">${channel}</div>
                 </div>
                 <div class="summary-item">
-                    <div class="summary-label">Duration</div>
-                    <div class="summary-value">${duration}</div>
+                    <div class="summary-label">${durationLabel}</div>
+                    <div class="summary-value">${durationValue}</div>
                 </div>
             </div>
             <div class="rec-reason" style="margin-top: 8px; color: #cbd5e1;">${recommendation}</div>

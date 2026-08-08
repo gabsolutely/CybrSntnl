@@ -66,10 +66,10 @@ canvas {
     "charts charts"
     "controls controls"
     "stats stats"
-    "detection detection"
-    "stresstest stresstest"
     "recommendations recommendations"
     "summary summary"
+    "detection detection"
+    "stresstest stresstest"
     "log log";
 }
 
@@ -524,10 +524,10 @@ canvas {
       "charts"
       "controls"
       "stats"
-      "detection"
-      "stresstest"
       "recommendations"
       "summary"
+      "detection"
+      "stresstest"
       "log";
   }
   
@@ -819,9 +819,9 @@ label.chk input[type="checkbox"] {
 /* ==========================================================================
    DETECTION THRESHOLDS PANEL (Option B runtime tuning)
    ========================================================================== */
-.detection-config-panel,
 .recommendations-panel,
 .summary-panel,
+.detection-config-panel,
 .log,
 .stresstest-panel,
 .stats-panel {

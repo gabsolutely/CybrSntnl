@@ -64,6 +64,12 @@ extern bool            mitigationActive;
 extern unsigned long   lastLogTime;
 extern int             eventCount;
 extern EventSummary    latestEventSummary;
+// Event lifecycle tracking — open/close transitions driven by taskFeatureExtraction.
+// Only ever written from the Core 1 feature task; no mutex required for these.
+extern unsigned long   eventStartTime;    // millis() when current event opened (0 = no active event)
+extern float           eventPeakScore;    // highest threat_score seen in this event
+extern bool            eventActive;       // true while threat level > THREAT_NONE
+
 
 extern ChannelMode currentChannelMode;
 extern uint8_t     currentChannel;
@@ -129,6 +135,15 @@ void   recPush(const RecEntry& entry);
 RecEntry recGet(uint8_t index); // 0 = newest, recRingCount-1 = oldest
 String recSeverityStr(RecSeverity s);
 String recParamStr(RecParameter p);
+
+// Event summary helpers (mutex-protected internally)
+void   setLatestEventSummary(const char* classification, const char* attackType,
+                             const char* recommendation, float threatScore,
+                             int channel, unsigned long durationMs, const char* source);
+void   clearLatestEventSummary();
+// Stamp a closing event with its final duration and peak score without
+// changing the text fields (called on the THREAT_NONE falling edge).
+void   freezeLatestEventSummary(unsigned long duration_ms, float peak_score);
 
 // Recommendation source generators
 void   recCheckBaselineDrift();

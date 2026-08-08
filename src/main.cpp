@@ -326,6 +326,28 @@ void taskFeatureExtraction(void *pvParameters) {
                 xSemaphoreGive(globalStateMutex);
             }
 
+            // Event lifecycle — detect rising and falling edges of threat activity.
+            // These variables are only written from this task (Core 1) so no mutex
+            // is needed here; setLatestEventSummary / freezeLatestEventSummary take
+            // the mutex internally when they write to the shared EventSummary struct.
+            const bool nowActive = (tempReport.level > THREAT_NONE);
+
+            if (!eventActive && nowActive) {
+                // Rising edge: a new event just opened.
+                eventActive    = true;
+                eventStartTime = millis();
+                eventPeakScore = tempReport.threat_score;
+            } else if (eventActive && !nowActive) {
+                // Falling edge: threat cleared — stamp the final duration + peak and
+                // leave the card visible as a closed historical snapshot.
+                unsigned long finalDur  = eventStartTime ? (millis() - eventStartTime) : 0;
+                float         finalPeak = eventPeakScore;
+                eventActive    = false;
+                eventStartTime = 0;
+                eventPeakScore = 0.0f;
+                freezeLatestEventSummary(finalDur, finalPeak);
+            }
+
             // Recommendation generators — run outside the critical section so
             // they don't starve the radio controller of the mutex.
             recCheckLiveThreatResponse(tempReport, tempFeatures);

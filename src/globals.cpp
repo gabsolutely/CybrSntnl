@@ -21,6 +21,11 @@ bool mitigationActive = false;
 unsigned long lastLogTime = 0;
 int eventCount = 0;
 
+// Event lifecycle tracking (written only from Core 1 feature task)
+unsigned long eventStartTime = 0;
+float         eventPeakScore = 0.0f;
+bool          eventActive    = false;
+
 // Mutex for protecting global state
 SemaphoreHandle_t globalStateMutex = NULL;
 
@@ -187,6 +192,15 @@ void setLatestEventSummary(const char* classification, const char* attackType, c
     if (globalStateMutex != NULL) xSemaphoreGive(globalStateMutex);
 }
 
+void freezeLatestEventSummary(unsigned long duration_ms, float peak_score) {
+    if (globalStateMutex != NULL) xSemaphoreTake(globalStateMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS));
+    if (latestEventSummary.present) {
+        latestEventSummary.duration_ms  = duration_ms;
+        latestEventSummary.threat_score = peak_score;
+    }
+    if (globalStateMutex != NULL) xSemaphoreGive(globalStateMutex);
+}
+
 void clearLatestEventSummary() {
     if (globalStateMutex != NULL) xSemaphoreTake(globalStateMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS));
 
@@ -316,7 +330,7 @@ void recCheckLiveThreatResponse(const ThreatReport& report, const FeatureVec& fe
     if (report.level < THREAT_LOW) return;
     unsigned long now = millis();
 
-    // Resolve attack type by exact matching attack_type against table.
+    // Resolve attack type by exact matching against the profile table.
     int attackIdx = -1;
     for (int i = 0; i < (int)ATTACK_PROFILES_COUNT; i++) {
         if (report.attack_type &&
@@ -326,90 +340,75 @@ void recCheckLiveThreatResponse(const ThreatReport& report, const FeatureVec& fe
             break;
         }
     }
-
-    // If no exact type match but threat is >= MEDIUM, fall back to generic
-    // suggestion at slot ATTACK_PROFILES_COUNT (debounce slot extra slot).
     const bool genericFallback = (attackIdx < 0 && report.level >= THREAT_MEDIUM);
-
-    // Tiered debounce: CRITICAL=immediate, ACTIVE/MEDIUM=30s, ELEVATED/LOW=60s
-    unsigned long DEBOUNCE_MS;
-    if (report.level >= THREAT_HIGH) {
-        DEBOUNCE_MS = 0; // Immediate for critical threats
-    } else if (report.level >= THREAT_MEDIUM) {
-        DEBOUNCE_MS = 30UL * 1000UL; // 30s for active/medium
-    } else {
-        DEBOUNCE_MS = 60UL * 1000UL; // 60s for elevated/low
-    }
-
-    int pushIdx = (attackIdx >= 0) ? attackIdx : (int)ATTACK_PROFILES_COUNT;
-    if (DEBOUNCE_MS > 0 && (now - lastRecAttackPush[pushIdx]) < DEBOUNCE_MS) {
-        return;
-    }
-    lastRecAttackPush[pushIdx] = now;
 
     const char* sevLabel = (report.level >= THREAT_HIGH)   ? "CRITICAL"
                          : (report.level >= THREAT_MEDIUM) ? "ACTIVE"
                          :                                    "ELEVATED";
 
-    // ---- 1. Remediation advice (always at least one card) ---------------
-    {
-        RecEntry e;
-        e.timestamp = now;
-        e.severity  = (report.level >= THREAT_HIGH)   ? REC_WARN
-                    : (report.level >= THREAT_MEDIUM) ? REC_SUGGEST
-                    :                                    REC_INFO;
-        e.parameter = REC_PARAM_DEAUTH;
-        e.from_value = report.threat_score;
-        e.to_value   = 0.0f;
-
-        if (attackIdx >= 0) {
-            const char* rem = ATTACK_PROFILES[attackIdx].recommendation;
-            snprintf(e.reason, sizeof(e.reason), "[%s] %s — score %.1f (%s on ch%d)",
-                     sevLabel,
-                     (rem && *rem) ? rem : "Mitigate active attack",
-                     report.threat_score,
-                     report.attack_type ? report.attack_type : "threat",
-                     (features.peak_channel > 0) ? features.peak_channel : 1);
-        } else if (genericFallback) {
-            snprintf(e.reason, sizeof(e.reason),
-                     "[%s] Active threat detected (%.1f) — audit APs/STAs on ch%d and enable containment",
-                     sevLabel, report.threat_score,
-                     (features.peak_channel > 0) ? features.peak_channel : 1);
-        } else {
-            // LOW threat with unknown attack type - still show something
-            snprintf(e.reason, sizeof(e.reason),
-                     "[%s] Elevated activity detected (%.1f) — %s on ch%d",
-                     sevLabel, report.threat_score,
-                     report.attack_type ? report.attack_type : "unknown",
-                     (features.peak_channel > 0) ? features.peak_channel : 1);
-        }
-        recPush(e);
-
-        // Update event summary for live threat display
-        const char* recText;
-        const char* attackText;
-
-        if (attackIdx >= 0) {
-            recText = ATTACK_PROFILES[attackIdx].recommendation;
-            attackText = report.attack_type;
-        } else if (genericFallback) {
-            recText = "Audit APs/STAs on this channel and enable containment";
-            attackText = "Active Threat";
-        } else {
-            // LOW threat with unknown attack type
-            recText = "Monitor airspace conditions for escalation";
-            attackText = report.attack_type ? report.attack_type : "Elevated Activity";
-        }
-
-        const char* source = stressTestActive ? "stress" : "event";
-        setLatestEventSummary(sevLabel, attackText, recText, report.threat_score,
-                             (features.peak_channel > 0) ? features.peak_channel : 1,
-                             0, source);
+    // Resolve display strings once — shared by both the summary and rec card.
+    const char* recText;
+    const char* attackText;
+    if (attackIdx >= 0) {
+        recText    = ATTACK_PROFILES[attackIdx].recommendation;
+        attackText = report.attack_type;
+    } else if (genericFallback) {
+        recText    = "Audit APs/STAs on this channel and enable containment";
+        attackText = "Active Threat";
+    } else {
+        recText    = "Monitor airspace conditions for escalation";
+        attackText = report.attack_type ? report.attack_type : "Elevated Activity";
     }
 
-    // Recommendations are mitigation-focused only; threshold tuning is left to
-    // the operator and is intentionally not surfaced here.
-    (void)features;
+    const char*   source = stressTestActive ? "stress" : "event";
+    const int     ch     = (features.peak_channel > 0) ? features.peak_channel : 1;
+
+    // ---- Always: update peak score and event summary (NOT debounced) --------
+    // This runs every feature window so the live card shows a continuously
+    // updating duration and the highest score reached, not just the first sample.
+    if (report.threat_score > eventPeakScore) eventPeakScore = report.threat_score;
+    unsigned long dur = eventStartTime ? (now - eventStartTime) : 0;
+    setLatestEventSummary(sevLabel, attackText, recText, eventPeakScore, ch, dur, source);
+
+    // ---- Debounced: push a recommendation card to the LRU ring --------------
+    unsigned long DEBOUNCE_MS;
+    if      (report.level >= THREAT_HIGH)   DEBOUNCE_MS = 0;
+    else if (report.level >= THREAT_MEDIUM) DEBOUNCE_MS = 30UL * 1000UL;
+    else                                    DEBOUNCE_MS = 60UL * 1000UL;
+
+    int pushIdx = (attackIdx >= 0) ? attackIdx : (int)ATTACK_PROFILES_COUNT;
+    if (DEBOUNCE_MS > 0 && (now - lastRecAttackPush[pushIdx]) < DEBOUNCE_MS) return;
+    lastRecAttackPush[pushIdx] = now;
+
+    RecEntry e;
+    e.timestamp  = now;
+    e.severity   = (report.level >= THREAT_HIGH)   ? REC_WARN
+                 : (report.level >= THREAT_MEDIUM) ? REC_SUGGEST
+                 :                                    REC_INFO;
+    e.parameter  = REC_PARAM_DEAUTH;
+    e.from_value = report.threat_score;
+    e.to_value   = 0.0f;
+
+    if (attackIdx >= 0) {
+        const char* rem = ATTACK_PROFILES[attackIdx].recommendation;
+        snprintf(e.reason, sizeof(e.reason), "[%s] %s - score %.1f (%s on ch%d)",
+                 sevLabel,
+                 (rem && *rem) ? rem : "Mitigate active attack",
+                 report.threat_score,
+                 report.attack_type ? report.attack_type : "threat",
+                 ch);
+    } else if (genericFallback) {
+        snprintf(e.reason, sizeof(e.reason),
+                 "[%s] Active threat detected (%.1f) - audit APs/STAs on ch%d and enable containment",
+                 sevLabel, report.threat_score, ch);
+    } else {
+        snprintf(e.reason, sizeof(e.reason),
+                 "[%s] Elevated activity detected (%.1f) - %s on ch%d",
+                 sevLabel, report.threat_score,
+                 report.attack_type ? report.attack_type : "unknown",
+                 ch);
+    }
+    recPush(e);
 }
 
 // Initialize the global state
@@ -443,6 +442,9 @@ void initializeGlobals() {
     recRingCount = 0;
     memset(recRing, 0, sizeof(recRing));
     clearLatestEventSummary();
+    eventActive    = false;
+    eventStartTime = 0;
+    eventPeakScore = 0.0f;
     baselineSampleCount = 0;
     memset(baselineFalseWarningCount, 0, sizeof(baselineFalseWarningCount));
     lastBaselineCheck = 0;
@@ -461,6 +463,9 @@ void resetSystemState() {
         mitigationActive = false;
         lastFeatureUpdate = 0;
         eventCount = 0;
+        eventActive    = false;
+        eventStartTime = 0;
+        eventPeakScore = 0.0f;
         xSemaphoreGive(globalStateMutex);
     }
 }
